@@ -8,6 +8,12 @@ import type { UsageEvent } from "../types";
 
 const CODEX_DIR = path.join(os.homedir(), ".codex", "sessions");
 
+/** Parse a token field to a non-negative integer (0 for missing/garbage). */
+function toInt(v: unknown): number {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 async function walkJsonl(root: string): Promise<string[]> {
   const out: string[] = [];
   async function walk(dir: string) {
@@ -53,10 +59,11 @@ export async function readCodexUsage(
 
     let sessionModel = "gpt-5";
     let project: string | undefined;
-    let lastInput = 0;
-    let lastOutput = 0;
-    let lastCached = 0;
-    let lastEventTs = "";
+    // Running baseline of the session's cumulative token_usage snapshot.
+    let baseInput = 0;
+    let baseOutput = 0;
+    let baseCached = 0;
+    let baseTotal = 0;
 
     const rl = readline.createInterface({
       input: createReadStream(file, { encoding: "utf8" }),
@@ -86,41 +93,77 @@ export async function readCodexUsage(
         const ts = (row.timestamp as string) ?? "";
         const info = payload.info as Record<string, unknown> | null | undefined;
         if (info) {
-          const total = (info.total_token_usage ?? info.last_token_usage) as Record<string, unknown> | undefined;
-          if (total) {
-            const input = Number(total.input_tokens ?? 0);
-            const output = Number(total.output_tokens ?? 0);
-            const cached = Number(total.cached_input_tokens ?? total.cache_read_input_tokens ?? 0);
-            if (input > lastInput || output > lastOutput) {
-              const dInput = Math.max(0, input - lastInput);
-              const dOutput = Math.max(0, output - lastOutput);
-              const dCached = Math.max(0, cached - lastCached);
-              lastInput = input;
-              lastOutput = output;
-              lastCached = cached;
-              lastEventTs = ts;
-              if (ts && (dInput + dOutput) > 0) {
-                const tsMs = new Date(ts).getTime();
-                if (!Number.isNaN(tsMs) && tsMs >= since) {
-                  const billableInput = Math.max(0, dInput - dCached);
-                  events.push({
-                    source: "codex",
-                    timestamp: ts,
-                    model: sessionModel,
-                    inputTokens: billableInput,
-                    outputTokens: dOutput,
-                    cacheCreateTokens: 0,
-                    cacheReadTokens: dCached,
-                    project,
-                    sessionId,
-                    costUSD: costFor(sessionModel, {
-                      input: billableInput,
-                      output: dOutput,
-                      cacheRead: dCached,
-                    }),
-                  });
-                }
-              }
+          const totalUsage = info.total_token_usage as
+            | Record<string, unknown>
+            | undefined;
+          const lastUsage = info.last_token_usage as
+            | Record<string, unknown>
+            | undefined;
+
+          let dInput = 0;
+          let dOutput = 0;
+          let dCached = 0;
+
+          if (totalUsage) {
+            // total_token_usage is cumulative for the session — take the delta
+            // against the running baseline. Codex occasionally RESETS the
+            // counter mid-session (e.g. context compaction / a fresh segment);
+            // when the cumulative total drops, the plain delta would be 0 and
+            // we'd silently lose those tokens. Detect the drop and treat the
+            // new snapshot itself as the increment, then re-baseline.
+            const curInput = toInt(totalUsage.input_tokens);
+            const curOutput = toInt(totalUsage.output_tokens);
+            const curCached = toInt(
+              totalUsage.cached_input_tokens ?? totalUsage.cache_read_input_tokens
+            );
+            const curTotal = toInt(totalUsage.total_tokens) || curInput + curOutput;
+
+            dInput = Math.max(0, curInput - baseInput);
+            dOutput = Math.max(0, curOutput - baseOutput);
+            dCached = Math.max(0, curCached - baseCached);
+
+            const isReset = baseTotal > 0 && curTotal > 0 && curTotal < baseTotal;
+            if (dInput + dOutput === 0 && isReset) {
+              dInput = curInput;
+              dOutput = curOutput;
+              dCached = curCached;
+            }
+            // Advance the baseline on every cumulative snapshot, even when this
+            // event falls outside the requested window (keeps deltas correct).
+            baseInput = curInput;
+            baseOutput = curOutput;
+            baseCached = curCached;
+            baseTotal = curTotal;
+          } else if (lastUsage) {
+            // No cumulative figure on this event: last_token_usage is the
+            // per-turn usage, so count it directly rather than as a delta.
+            dInput = toInt(lastUsage.input_tokens);
+            dOutput = toInt(lastUsage.output_tokens);
+            dCached = toInt(
+              lastUsage.cached_input_tokens ?? lastUsage.cache_read_input_tokens
+            );
+          }
+
+          if (ts && dInput + dOutput > 0) {
+            const tsMs = new Date(ts).getTime();
+            if (!Number.isNaN(tsMs) && tsMs >= since) {
+              const billableInput = Math.max(0, dInput - dCached);
+              events.push({
+                source: "codex",
+                timestamp: ts,
+                model: sessionModel,
+                inputTokens: billableInput,
+                outputTokens: dOutput,
+                cacheCreateTokens: 0,
+                cacheReadTokens: dCached,
+                project,
+                sessionId,
+                costUSD: costFor(sessionModel, {
+                  input: billableInput,
+                  output: dOutput,
+                  cacheRead: dCached,
+                }),
+              });
             }
           }
         }
@@ -146,7 +189,6 @@ export async function readCodexUsage(
         }
       }
     }
-    void lastEventTs;
   }
   return { events, latestRateLimit: latest };
 }
