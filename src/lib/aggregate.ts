@@ -2,8 +2,22 @@ import { readClaudeUsage } from "./sources/claude";
 import { readCodexUsage } from "./sources/codex";
 import type { UsageEvent, UsageSnapshot, SourceId, DailyBucket, ModelBreakdown } from "./types";
 
+function localDayKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate()
+  ).padStart(2, "0")}`;
+}
+
+function addLocalDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
 function ymd(iso: string): string {
-  return iso.slice(0, 10);
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso.slice(0, 10);
+  return localDayKey(date);
 }
 
 function emptySourceMap(): Record<SourceId, { tokens: number; costUSD: number; sessions: number }> {
@@ -35,13 +49,14 @@ function eventTokens(e: UsageEvent): number {
 
 export async function buildSnapshot(daysBack = 30): Promise<UsageSnapshot> {
   const today = new Date();
-  const todayStr = today.toISOString().slice(0, 10);
-  const sinceDate = new Date(today.getTime() - daysBack * 86400 * 1000).toISOString().slice(0, 10);
+  const todayStr = localDayKey(today);
+  const sinceDate = localDayKey(addLocalDays(today, -daysBack));
+  const sourceSinceDate = localDayKey(addLocalDays(today, -daysBack - 1));
 
   const warnings: string[] = [];
   const [claudeRes, codexRes] = await Promise.allSettled([
-    readClaudeUsage(sinceDate),
-    readCodexUsage(sinceDate),
+    readClaudeUsage(sourceSinceDate),
+    readCodexUsage(sourceSinceDate),
   ]);
 
   const events: UsageEvent[] = [];
@@ -65,7 +80,7 @@ export async function buildSnapshot(daysBack = 30): Promise<UsageSnapshot> {
 
   const dailyMap = new Map<string, DailyBucket>();
   for (let i = 0; i <= daysBack; i++) {
-    const d = new Date(today.getTime() - i * 86400 * 1000).toISOString().slice(0, 10);
+    const d = localDayKey(addLocalDays(today, -i));
     dailyMap.set(d, emptyDaily(d));
   }
 
