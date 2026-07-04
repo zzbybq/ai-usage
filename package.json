@@ -6,7 +6,10 @@
     "dev": "next dev -p 3002",
     "build": "next build",
     "start": "next start -p 3002",
-    "lint": "eslint"
+    "lint": "eslint",
+    "tauri": "tauri",
+    "widget:dev": "tauri dev",
+    "widget:build": "tauri build"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -19,6 +22,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

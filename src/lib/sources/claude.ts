@@ -67,9 +67,6 @@ export async function readClaudeUsage(sinceDate: string): Promise<UsageEvent[]> 
       if (!usage) continue;
       const messageId = (msg?.id as string) ?? "";
       const requestId = (row.requestId as string) ?? "";
-      const dedupKey = `${messageId}:${requestId}`;
-      if (messageId && seen.has(dedupKey)) continue;
-      if (messageId) seen.add(dedupKey);
 
       const ts = (row.timestamp as string) ?? "";
       if (!ts) continue;
@@ -84,6 +81,19 @@ export async function readClaudeUsage(sinceDate: string): Promise<UsageEvent[]> 
       const cacheCreate = Number(usage.cache_creation_input_tokens ?? 0);
       const cacheRead = Number(usage.cache_read_input_tokens ?? 0);
       if (input + output + cacheCreate + cacheRead === 0) continue;
+
+      // Dedup by sessionId + messageId + requestId, but ONLY among rows that
+      // carry real token usage. Some local proxies split one streamed response
+      // into multiple assistant rows (thinking / text / tool_use) that share a
+      // single messageId: the thinking/text rows have usage=0 and the tool_use
+      // rows repeat the same non-zero usage. Deduping before the zero-token
+      // filter would let a usage=0 row claim the key and drop the real one
+      // (under-counting); not deduping at all would sum the repeated usage
+      // (over-counting). Keying on sessionId + messageId + requestId after the
+      // zero-token filter keeps exactly one real-usage row per response.
+      const dedupKey = `${sessionId}:${messageId}:${requestId}`;
+      if (messageId && seen.has(dedupKey)) continue;
+      if (messageId) seen.add(dedupKey);
 
       events.push({
         source: "claude-code",

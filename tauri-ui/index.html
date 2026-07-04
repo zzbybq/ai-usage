@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width">
+<title>AI Usage Widget</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+      "Helvetica Neue", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+    user-select: none;
+    color: #fff;
+    -webkit-transform: translateZ(0);
+  }
+
+  .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+  :root {
+    /* theme accent — set live by applyTheme() from the tray menu.
+       Initialized to the persisted theme below via inline script to avoid a
+       first-frame flash of the wrong palette. */
+    --shadow-rgb: 8,145,178;
+    --tab-top: 42,214,192;
+    --tab-bot: 8,145,178;
+  }
+
+  /* ── Ball (collapsed) — glass orb + canvas water, native drag ── */
+
+  /* #pill fills the whole (transparent) window and just centers the orb;
+     it is also the drag surface. The window is larger than the orb so the
+     orb's drop-shadow has room and is not clipped into side bands. */
+  #pill {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+  }
+  #pill:active { cursor: grabbing; }
+
+  /* Tauri drag: children must not eat the mousedown. */
+  #pill > *, .card-header > * { pointer-events: none; }
+
+  .orb {
+    position: relative;
+    width: 84px;
+    height: 84px;
+    border-radius: 50%;
+  }
+  /* soft drop shadow + inner top gloss (from the reference design) */
+  .orb-shadow {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    box-shadow: 0 9px 20px -6px rgba(var(--shadow-rgb),0.50),
+                inset 0 3px 8px rgba(255,255,255,0.55);
+  }
+  /* canvas draws the empty-glass fill + animated sine-wave water */
+  .orb-canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    border-radius: 50%;
+    display: block;
+  }
+  /* specular highlight sweep */
+  .orb-gloss {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    background: radial-gradient(circle at 34% 26%,
+      rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.12) 22%, rgba(255,255,255,0) 46%);
+  }
+  /* rim */
+  .orb-ring {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    border: 1.5px solid rgba(255,255,255,0.5);
+  }
+  .orb-text {
+    position: absolute; inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pill-tokens {
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    white-space: nowrap;
+    color: #fff;
+    /* dark teal halo + hairline stroke so white stays legible on both the
+       pale glass and the deep water, at any fill level */
+    text-shadow: 0 1px 1px rgba(2,44,54,0.60),
+                 0 1px 4px rgba(2,44,54,0.55),
+                 0 0 3px rgba(2,44,54,0.65);
+    -webkit-text-stroke: 0.45px rgba(2,55,66,0.28);
+    paint-order: stroke fill;
+  }
+
+  /* ── Edge tab — gradient glow line ── */
+
+  #edge-tab {
+    display: none;
+    width: 100%;
+    height: 100%;
+    border-radius: 0 3px 3px 0;
+    background: linear-gradient(180deg, rgba(var(--tab-top),0.85), rgba(var(--tab-bot),0.85));
+    box-shadow: 2px 0 12px rgba(var(--tab-bot),0.45);
+    cursor: pointer;
+  }
+
+  /* ── Card (hover expanded) — Aurora gradient glass ── */
+
+  #card {
+    display: none;
+    width: 100%;
+    height: 100%;
+    border-radius: 18px;
+    overflow: hidden;
+    background: linear-gradient(145deg, rgba(102,126,234,0.9), rgba(118,75,162,0.9));
+    backdrop-filter: blur(30px) saturate(180%);
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
+    box-shadow: 0 8px 40px rgba(102,126,234,0.3);
+    animation: card-in 0.2s cubic-bezier(0.16,1,0.3,1);
+    flex-direction: column;
+  }
+  @keyframes card-in {
+    from { opacity: 0; transform: scale(0.92) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 14px 16px 10px;
+    cursor: grab;
+    flex-shrink: 0;
+  }
+  .card-header:active { cursor: grabbing; }
+  .header-title { font-size: 13px; font-weight: 600; }
+  .header-date { font-size: 10px; color: rgba(255,255,255,0.5); margin-left: auto; }
+
+  .card-body {
+    padding: 4px 16px 14px;
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .big-number {
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+  .big-unit {
+    font-size: 12px;
+    font-weight: 400;
+    color: rgba(255,255,255,0.45);
+  }
+
+  /* progress bar */
+  .source-bar {
+    margin-top: 12px;
+    height: 4px;
+    background: rgba(255,255,255,0.12);
+    border-radius: 2px;
+    overflow: hidden;
+    display: flex;
+  }
+  .bar-claude { height: 100%; background: #ff9f0a; transition: width 0.7s; }
+  .bar-codex  { height: 100%; background: #5eead4; transition: width 0.7s; }
+
+  /* source cards */
+  .source-grid {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .source-card {
+    padding: 10px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.1);
+  }
+  .source-name {
+    font-size: 9px;
+    color: rgba(255,255,255,0.4);
+  }
+  .source-number {
+    font-size: 16px;
+    font-weight: 600;
+    margin-top: 2px;
+  }
+  .source-detail {
+    font-size: 9px;
+    color: rgba(255,255,255,0.35);
+    margin-top: 2px;
+  }
+
+  /* token breakdown */
+  .breakdown {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    font-size: 11px;
+  }
+  .breakdown span {
+    white-space: nowrap;
+  }
+  .tk-claude { color: #ff9f0a; }
+  .tk-codex  { color: #5eead4; }
+  .tk-cache-c { color: #69f0ae; }
+  .tk-cache-r { color: #ffd54f; }
+
+  /* history link */
+  .history-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    margin-top: 12px;
+    padding: 7px 0;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.7);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    width: 100%;
+    transition: background 0.15s, color 0.15s;
+  }
+  .history-link:hover {
+    background: rgba(255,255,255,0.18);
+    color: #fff;
+  }
+  .history-arrow { font-size: 10px; }
+
+  .card-footer {
+    padding: 8px 16px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-shrink: 0;
+  }
+  .refresh-label { font-size: 9px; color: rgba(255,255,255,0.25); }
+</style>
+</head>
+<body>
+
+<!-- Ball — glass orb with canvas water, native drag -->
+<div id="pill" data-tauri-drag-region>
+  <div class="orb">
+    <div class="orb-shadow"></div>
+    <canvas id="water-canvas" class="orb-canvas" width="168" height="168"></canvas>
+    <div class="orb-gloss"></div>
+    <div class="orb-ring"></div>
+    <div class="orb-text"><span id="pill-tokens" class="pill-tokens num">…</span></div>
+  </div>
+</div>
+
+<!-- Edge tab — gradient glow line -->
+<div id="edge-tab"></div>
+
+<!-- Card — Aurora gradient glass -->
+<div id="card">
+  <div class="card-header" data-tauri-drag-region>
+    <span class="header-title">AI Usage</span>
+    <span class="header-date" id="card-date">Today</span>
+  </div>
+  <div class="card-body">
+    <div>
+      <span class="big-number num" id="card-total">—</span>
+      <span class="big-unit">tokens</span>
+    </div>
+
+    <div class="source-bar">
+      <div class="bar-claude" id="bar-claude" style="width:0%"></div>
+      <div class="bar-codex" id="bar-codex" style="width:0%"></div>
+    </div>
+
+    <div class="source-grid">
+      <div class="source-card">
+        <div class="source-name">Claude Code</div>
+        <div class="source-number num" id="claude-tokens">—</div>
+        <div class="source-detail num" id="claude-detail">—</div>
+      </div>
+      <div class="source-card">
+        <div class="source-name">Codex CLI</div>
+        <div class="source-number num" id="codex-tokens">—</div>
+        <div class="source-detail num" id="codex-detail">—</div>
+      </div>
+    </div>
+
+    <div class="breakdown">
+      <span class="tk-claude">● Input <span class="num" id="tok-input">—</span></span>
+      <span class="tk-codex">● Output <span class="num" id="tok-output">—</span></span>
+      <span class="tk-cache-c">● Cache Create <span class="num" id="tok-cache-create">—</span></span>
+      <span class="tk-cache-r">● Cache Read <span class="num" id="tok-cache-read">—</span></span>
+    </div>
+
+    <button class="history-link" id="btn-history">
+      View Full History <span class="history-arrow">→</span>
+    </button>
+  </div>
+  <div class="card-footer">
+    <span class="refresh-label">Auto-refresh 15s</span>
+  </div>
+</div>
+
+<script>
+/* ── Pre-paint theme: set CSS vars before first frame to avoid flash ── */
+(function () {
+  var THEMES_PRE = {
+    Ocean:  { shadow: "11,100,196", tab: ["42,157,246", "11,100,196"] },
+    Aurora: { shadow: "91,47,214",  tab: ["138,134,255", "91,47,214"] },
+    Sunset: { shadow: "238,77,95",  tab: ["255,157,100", "238,77,95"] },
+    Lagoon: { shadow: "8,145,178",  tab: ["42,214,192", "8,145,178"] }
+  };
+  var t = THEMES_PRE[localStorage.getItem("theme")] || THEMES_PRE.Lagoon;
+  var rs = document.documentElement.style;
+  rs.setProperty("--shadow-rgb", t.shadow);
+  rs.setProperty("--tab-top", t.tab[0]);
+  rs.setProperty("--tab-bot", t.tab[1]);
+})();
+</script>
+
+<script>
+function fmtTokens(n) {
+  if (n == null || !Number.isFinite(n)) return "0";
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  if (n >= 1e4) return (n / 1e3).toFixed(1) + "K";
+  if (n >= 1e3) return (n / 1e3).toFixed(2) + "K";
+  return Math.round(n).toString();
+}
+
+var $pill    = document.getElementById("pill");
+var $card    = document.getElementById("card");
+var $edgeTab = document.getElementById("edge-tab");
+var $tokens  = document.getElementById("pill-tokens");
+/* ── Canvas water — ported from the claude.ai/design "Ocean" ball ── */
+var FULL_TOKENS = 200000000;                 // 2亿 tokens = full ball
+var THEMES = {
+  Ocean:  { top: "#3fb9f6", bot: "#0b64c4", empty: ["rgba(224,243,255,0.95)", "rgba(198,228,252,0.95)"], shadow: "11,100,196", tab: ["42,157,246", "11,100,196"] },
+  Aurora: { top: "#8a86ff", bot: "#5b2fd6", empty: ["rgba(235,232,255,0.95)", "rgba(216,208,252,0.95)"], shadow: "91,47,214",  tab: ["138,134,255", "91,47,214"] },
+  Sunset: { top: "#ff9d64", bot: "#ee4d5f", empty: ["rgba(255,238,228,0.95)", "rgba(255,222,214,0.95)"], shadow: "238,77,95",  tab: ["255,157,100", "238,77,95"] },
+  Lagoon: { top: "#2ad6c0", bot: "#0891b2", empty: ["rgba(223,250,246,0.95)", "rgba(200,240,242,0.95)"], shadow: "8,145,178",  tab: ["42,214,192", "8,145,178"] }
+};
+function hex2rgb(h){ h = h.replace("#",""); return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)]; }
+
+var wcanvas = document.getElementById("water-canvas");
+var wctx = wcanvas.getContext("2d");
+var WW = wcanvas.width, WH = wcanvas.height, WR = WW / 2;
+function wrgba(c, a){ return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + a + ")"; }
+
+var PAL, W_TOP, W_BOT;
+function applyTheme(name) {
+  var t = THEMES[name] || THEMES.Lagoon;
+  PAL = t;
+  W_TOP = hex2rgb(t.top); W_BOT = hex2rgb(t.bot);
+  var rs = document.documentElement.style;
+  rs.setProperty("--shadow-rgb", t.shadow);
+  rs.setProperty("--tab-top", t.tab[0]);
+  rs.setProperty("--tab-bot", t.tab[1]);
+  try { localStorage.setItem("theme", name); } catch (e) {}
+}
+applyTheme(localStorage.getItem("theme") || "Lagoon");
+
+var wt = 0;                 // wave phase
+var waterLevel = 0.04;      // current fill 0..1 (eased)
+var waterTarget = 0.04;     // target fill 0..1
+var waterTimer = null;
+
+function setWaterLevel(total) {
+  waterTarget = total > 0 ? Math.max(0.03, Math.min(1, total / FULL_TOKENS)) : 0.02;
+}
+
+function drawWater() {
+  waterLevel += (waterTarget - waterLevel) * 0.08;           // ease toward target
+  var amp = WW * 0.028, k = WW / 5.8;
+  wctx.clearRect(0, 0, WW, WH);
+  wctx.save();
+  wctx.beginPath(); wctx.arc(WR, WR, WR, 0, Math.PI * 2); wctx.clip();
+  // empty-glass background
+  var bg = wctx.createLinearGradient(0, 0, 0, WH);
+  bg.addColorStop(0, PAL.empty[0]); bg.addColorStop(1, PAL.empty[1]);
+  wctx.fillStyle = bg; wctx.fillRect(0, 0, WW, WH);
+  // two sine-wave water layers
+  var baseY = WH * (1 - waterLevel);
+  var wave = function (offset, speed, alpha, ampl) {
+    wctx.beginPath(); wctx.moveTo(0, WH);
+    for (var x = 0; x <= WW; x += 4) wctx.lineTo(x, baseY + Math.sin(x / k + wt * speed + offset) * ampl);
+    wctx.lineTo(WW, WH); wctx.closePath();
+    var g = wctx.createLinearGradient(0, baseY - ampl, 0, WH);
+    g.addColorStop(0, wrgba(W_TOP, alpha)); g.addColorStop(1, wrgba(W_BOT, alpha));
+    wctx.fillStyle = g; wctx.fill();
+  };
+  wave(Math.PI, 0.9, 0.45, amp * 0.8);
+  wave(0, 1.35, 1, amp);
+  wctx.restore();
+  wt += 0.06;                 // ~30fps step, matches the reference speed
+}
+function startWater() { if (!waterTimer) { drawWater(); waterTimer = setInterval(drawWater, 33); } }
+function stopWater()  { if (waterTimer) { clearInterval(waterTimer); waterTimer = null; } }
+
+function updateUI(today) {
+  if (!today) { $tokens.textContent = "…"; return; }
+  var claude = (today.bySource && today.bySource["claude-code"]) || { tokens: 0, sessions: 0 };
+  var codex  = (today.bySource && today.bySource.codex) || { tokens: 0, sessions: 0 };
+  var total  = today.totalTokens || 0;
+  var cPct   = total > 0 ? (claude.tokens / total) * 100 : 0;
+  var xPct   = total > 0 ? (codex.tokens / total) * 100 : 0;
+
+  $tokens.textContent = fmtTokens(total);
+  setWaterLevel(total);
+  document.getElementById("card-total").textContent    = fmtTokens(total);
+  document.getElementById("bar-claude").style.width    = cPct + "%";
+  document.getElementById("bar-codex").style.width     = xPct + "%";
+  document.getElementById("claude-tokens").textContent = fmtTokens(claude.tokens);
+  document.getElementById("claude-detail").textContent = claude.sessions + " session" + (claude.sessions === 1 ? "" : "s");
+  document.getElementById("codex-tokens").textContent  = fmtTokens(codex.tokens);
+  document.getElementById("codex-detail").textContent  = codex.sessions + " session" + (codex.sessions === 1 ? "" : "s");
+  document.getElementById("tok-input").textContent        = fmtTokens(today.inputTokens);
+  document.getElementById("tok-output").textContent       = fmtTokens(today.outputTokens);
+  document.getElementById("tok-cache-create").textContent = fmtTokens(today.cacheCreateTokens);
+  document.getElementById("tok-cache-read").textContent   = fmtTokens(today.cacheReadTokens);
+  document.getElementById("card-date").textContent        = today.date || "Today";
+}
+
+function showPill() {
+  $pill.style.display = "flex";
+  $card.style.display = "none";
+  $edgeTab.style.display = "none";
+  startWater();
+}
+function showCard() {
+  $pill.style.display = "none";
+  $card.style.display = "flex";
+  $edgeTab.style.display = "none";
+  stopWater();
+}
+function showEdgeTab() {
+  $pill.style.display = "none";
+  $card.style.display = "none";
+  $edgeTab.style.display = "block";
+  stopWater();
+}
+
+/* ── Tauri bridge ─────────────────────────────────────────── */
+var invoke = window.__TAURI__.core.invoke;
+
+// tray "Theme" submenu → live palette switch
+window.__TAURI__.event.listen("theme", function (e) { applyTheme(e.payload); });
+
+/* ── layout constants ───────────────────────────────────── */
+var PILL_W = 116, PILL_H = 116, ORB_D = 84, CARD_W = 280, CARD_H = 380, EDGE_W = 6, EDGE_H = 48;
+var EDGE_THRESHOLD = 20;
+
+/* ── hover state machine ────────────────────────────────── */
+var expanded = false, edgeHidden = false, savedPos = null;
+var hoverState = "out", hoverEnterTime = 0, hoverLeaveTime = 0, lastWinPos = null;
+
+function setBounds(x, y, w, h) { return invoke("set_bounds", { x: x, y: y, w: w, h: h }); }
+
+async function doExpand(g) {
+  if (expanded) return;
+  expanded = true;
+  if (edgeHidden) await restoreFromEdge(g);
+  var nx = g.wx + PILL_W - CARD_W;
+  var ny = g.wy + PILL_H - CARD_H;
+  nx = Math.max(g.work_x + 4, Math.min(nx, g.work_x + g.work_w - CARD_W - 4));
+  ny = Math.max(g.work_y + 4, Math.min(ny, g.work_y + g.work_h - CARD_H - 4));
+  await setBounds(nx, ny, CARD_W, CARD_H);
+  showCard();
+}
+async function doCollapse(g) {
+  if (!expanded) return;
+  expanded = false;
+  var nx = g.wx + CARD_W - PILL_W;
+  var ny = g.wy + CARD_H - PILL_H;
+  nx = Math.max(g.work_x + 4, Math.min(nx, g.work_x + g.work_w - PILL_W - 4));
+  ny = Math.max(g.work_y + 4, Math.min(ny, g.work_y + g.work_h - PILL_H - 4));
+  await setBounds(nx, ny, PILL_W, PILL_H);
+  showPill();
+}
+function isAtEdge(g) {
+  var r = g.work_x + g.work_w, bot = g.work_y + g.work_h;
+  var curW = expanded ? CARD_W : (edgeHidden ? EDGE_W : PILL_W);
+  var curH = expanded ? CARD_H : (edgeHidden ? EDGE_H : PILL_H);
+  return (
+    g.wx <= g.work_x + EDGE_THRESHOLD ||
+    g.wx + curW >= r - EDGE_THRESHOLD ||
+    g.wy <= g.work_y + EDGE_THRESHOLD ||
+    g.wy + curH >= bot - EDGE_THRESHOLD
+  );
+}
+async function applyEdgeHide(g) {
+  if (edgeHidden) return;
+  edgeHidden = true;
+  savedPos = [g.wx, g.wy];
+  var r = g.work_x + g.work_w, bot = g.work_y + g.work_h;
+  var cx = g.wx + PILL_W / 2, cy = g.wy + PILL_H / 2;
+  var dL = cx - g.work_x, dR = r - cx, dT = cy - g.work_y, dB = bot - cy;
+  var m = Math.min(dL, dR, dT, dB);
+  var nx, ny;
+  if (m === dL)      { nx = g.work_x - 1;          ny = g.wy; }
+  else if (m === dR) { nx = r - EDGE_W - 1;        ny = g.wy; }
+  else if (m === dT) { nx = g.wx;                  ny = g.work_y - 1; }
+  else               { nx = g.wx;                  ny = bot - EDGE_H - 1; }
+  await setBounds(nx, ny, EDGE_W, EDGE_H);
+  showEdgeTab();
+}
+async function restoreFromEdge(g) {
+  if (!edgeHidden) return;
+  edgeHidden = false;
+  if (savedPos) {
+    var nx = savedPos[0], ny = savedPos[1];
+    if (nx <= g.work_x + EDGE_THRESHOLD + 4) nx = g.work_x + EDGE_THRESHOLD + 8;
+    if (nx + PILL_W >= g.work_x + g.work_w - EDGE_THRESHOLD - 4) nx = g.work_x + g.work_w - EDGE_THRESHOLD - PILL_W - 8;
+    if (ny <= g.work_y + EDGE_THRESHOLD + 4) ny = g.work_y + EDGE_THRESHOLD + 8;
+    if (ny + PILL_H >= g.work_y + g.work_h - EDGE_THRESHOLD - 4) ny = g.work_y + g.work_h - EDGE_THRESHOLD - PILL_H - 8;
+    nx = Math.max(g.work_x + 4, Math.min(nx, g.work_x + g.work_w - PILL_W - 4));
+    ny = Math.max(g.work_y + 4, Math.min(ny, g.work_y + g.work_h - PILL_H - 4));
+    await setBounds(nx, ny, PILL_W, PILL_H);
+  }
+  savedPos = null;
+  showPill();
+}
+
+var ticking = false;
+async function tick() {
+  if (ticking) return;
+  ticking = true;
+  try {
+    var g = await invoke("get_geometry");
+    var inWin;
+    if (!expanded && !edgeHidden) {
+      // pill mode: the window is larger than the visible orb, so hit-test the
+      // orb circle (not the square window) — transparent corners don't expand.
+      var ccx = g.wx + g.ww / 2, ccy = g.wy + g.wh / 2;
+      var dx = g.cx - ccx, dy = g.cy - ccy, rr = ORB_D / 2 + 3;
+      inWin = dx * dx + dy * dy <= rr * rr;
+    } else {
+      inWin = g.cx >= g.wx && g.cx <= g.wx + g.ww && g.cy >= g.wy && g.cy <= g.wy + g.wh;
+    }
+    var dragging = false;
+    if (lastWinPos) dragging = g.wx !== lastWinPos[0] || g.wy !== lastWinPos[1];
+    lastWinPos = [g.wx, g.wy];
+
+    if (inWin && !dragging) {
+      if (hoverState === "out") {
+        hoverState = "hovering"; hoverEnterTime = Date.now();
+        if (edgeHidden) { await restoreFromEdge(g); hoverState = "hovering"; hoverEnterTime = Date.now(); }
+      } else if (hoverState === "hovering") {
+        if (!edgeHidden && Date.now() - hoverEnterTime > 400 && !expanded) { hoverState = "in"; await doExpand(g); }
+      } else if (hoverState === "leaving") {
+        hoverState = "in";
+      }
+    } else if (!inWin) {
+      if (hoverState === "hovering") {
+        hoverState = "out";
+      } else if (hoverState === "in") {
+        hoverState = "leaving"; hoverLeaveTime = Date.now();
+      } else if (hoverState === "leaving") {
+        if (Date.now() - hoverLeaveTime > 600) { hoverState = "out"; await doCollapse(g); }
+      }
+    } else if (dragging && hoverState === "hovering") {
+      hoverState = "out";
+    }
+
+    if (!expanded && !edgeHidden && !dragging && !inWin) {
+      if (isAtEdge(g)) await applyEdgeHide(g);
+    }
+  } catch (e) { /* window not ready yet */ }
+  ticking = false;
+}
+
+async function poll() {
+  try {
+    var today = await invoke("fetch_usage");
+    if (today) updateUI(today); else $tokens.textContent = "…";
+  } catch (e) { $tokens.textContent = "!"; }
+}
+
+document.getElementById("btn-history").addEventListener("click", function (e) {
+  e.stopPropagation();
+  invoke("open_history");
+});
+
+showPill();
+poll();
+setInterval(poll, 15000);
+// 200ms hover polling — halves IPC traffic vs 100ms with no perceptible lag
+// (the hover state-machine uses 400ms enter / 600ms leave thresholds).
+setInterval(tick, 200);
+</script>
+</body>
+</html>

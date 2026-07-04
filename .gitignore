@@ -40,3 +40,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# tauri (desktop widget build artifacts)
+/src-tauri/target
+/src-tauri/gen
+/src-tauri/check.out
+
