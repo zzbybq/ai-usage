@@ -31,11 +31,46 @@ function decodeProject(slug: string): string {
   return slug.replace(/^-+/, "").replace(/-+/g, "/").replace(/^([a-zA-Z])\//, "$1:/");
 }
 
+type ClaudeUsageCandidate = {
+  source: "claude-code";
+  timestamp: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreateTokens: number;
+  cacheReadTokens: number;
+  project: string;
+  sessionId: string;
+  messageId: string;
+};
+
+function usageTotal(e: ClaudeUsageCandidate): number {
+  return e.inputTokens + e.outputTokens + e.cacheCreateTokens + e.cacheReadTokens;
+}
+
+function usageScore(e: ClaudeUsageCandidate): [number, number, number] {
+  const values = [e.inputTokens, e.outputTokens, e.cacheCreateTokens, e.cacheReadTokens];
+  return [
+    usageTotal(e),
+    values.filter((v) => v > 0).length,
+    values.filter((v) => Number.isFinite(v)).length,
+  ];
+}
+
+function isBetterUsage(candidate: ClaudeUsageCandidate, existing: ClaudeUsageCandidate): boolean {
+  const a = usageScore(candidate);
+  const b = usageScore(existing);
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return a[i] > b[i];
+  }
+  return new Date(candidate.timestamp).getTime() > new Date(existing.timestamp).getTime();
+}
+
 export async function readClaudeUsage(sinceDate: string): Promise<UsageEvent[]> {
   const files = await walkJsonl(CLAUDE_DIR);
   const since = new Date(sinceDate + "T00:00:00.000Z").getTime();
-  const events: UsageEvent[] = [];
-  const seen = new Set<string>();
+  const eventsByMessage = new Map<string, ClaudeUsageCandidate>();
+  const passthroughEvents: ClaudeUsageCandidate[] = [];
 
   for (const file of files) {
     const stat = await fs.stat(file).catch(() => null);
@@ -66,7 +101,6 @@ export async function readClaudeUsage(sinceDate: string): Promise<UsageEvent[]> 
       const usage = msg?.usage as Record<string, unknown> | undefined;
       if (!usage) continue;
       const messageId = (msg?.id as string) ?? "";
-      const requestId = (row.requestId as string) ?? "";
 
       const ts = (row.timestamp as string) ?? "";
       if (!ts) continue;
@@ -82,20 +116,7 @@ export async function readClaudeUsage(sinceDate: string): Promise<UsageEvent[]> 
       const cacheRead = Number(usage.cache_read_input_tokens ?? 0);
       if (input + output + cacheCreate + cacheRead === 0) continue;
 
-      // Dedup by sessionId + messageId + requestId, but ONLY among rows that
-      // carry real token usage. Some local proxies split one streamed response
-      // into multiple assistant rows (thinking / text / tool_use) that share a
-      // single messageId: the thinking/text rows have usage=0 and the tool_use
-      // rows repeat the same non-zero usage. Deduping before the zero-token
-      // filter would let a usage=0 row claim the key and drop the real one
-      // (under-counting); not deduping at all would sum the repeated usage
-      // (over-counting). Keying on sessionId + messageId + requestId after the
-      // zero-token filter keeps exactly one real-usage row per response.
-      const dedupKey = `${sessionId}:${messageId}:${requestId}`;
-      if (messageId && seen.has(dedupKey)) continue;
-      if (messageId) seen.add(dedupKey);
-
-      events.push({
+      const candidate: ClaudeUsageCandidate = {
         source: "claude-code",
         timestamp: ts,
         model,
@@ -106,9 +127,31 @@ export async function readClaudeUsage(sinceDate: string): Promise<UsageEvent[]> 
         project,
         sessionId,
         messageId,
-        costUSD: costFor(model, { input, output, cacheCreate, cacheRead }),
-      });
+      };
+
+      if (!messageId) {
+        passthroughEvents.push(candidate);
+        continue;
+      }
+
+      // Proxies can emit several non-zero cumulative usage rows for one
+      // assistant message. Keep the richest/final payload, matching the plugin
+      // extractor's best-token-payload behavior.
+      const dedupKey = `${sessionId}:${messageId}`;
+      const existing = eventsByMessage.get(dedupKey);
+      if (!existing || isBetterUsage(candidate, existing)) {
+        eventsByMessage.set(dedupKey, candidate);
+      }
     }
   }
-  return events;
+
+  return [...eventsByMessage.values(), ...passthroughEvents].map((e) => ({
+    ...e,
+    costUSD: costFor(e.model, {
+      input: e.inputTokens,
+      output: e.outputTokens,
+      cacheCreate: e.cacheCreateTokens,
+      cacheRead: e.cacheReadTokens,
+    }),
+  }));
 }
