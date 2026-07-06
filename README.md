@@ -70,6 +70,33 @@ echo $! > .server.pid
 
 停掉：`kill $(cat .server.pid)`
 
+## 桌面悬浮球（Tauri）
+
+除了浏览器看板，还能打包成 Windows 桌面悬浮球 **AI Usage.exe**：屏幕角落一个常驻玻璃球（canvas 水波动画反映今日 token 用量），鼠标悬停展开详情卡片，贴边自动隐藏成一条边线，托盘图标可切主题 / 打开完整看板。基于 Tauri 2，代码在 `src-tauri/` 和 `tauri-ui/`。
+
+### 球 ↔ 3002 服务的关系
+
+悬浮球不是把看板塞进 webview，而是本机先跑一个真实的 Next.js 服务（3002 端口），球只是它的客户端：每 15s 通过 std TcpStream 直连 `127.0.0.1:3002` 拉今日用量，连接失败自动重试一次。球和浏览器看板共用同一个服务和数据。
+
+### 构建与启动
+
+```bash
+npm install          # 首次装依赖（含 @tauri-apps/cli）
+npm run build        # next build → 产出 .next（3002 服务用）
+npm start            # 起 3002 服务（或用 start-hidden.vbs 后台跑）
+npm run widget:build # 打包悬浮球 → src-tauri/target/release/bundle/nsis/AI Usage_0.1.0_x64-setup.exe
+npm run widget:dev   # 本地调试球（需 3002 服务已起）
+```
+
+启动顺序：先起 3002 服务（`npm start` 或 `start-hidden.vbs`），再启动悬浮球。球不负责拉起服务——服务没起时球显示 `!`，服务恢复后自动刷新。
+
+### 常驻与开机自启
+
+- **3002 服务**：用 PM2 常驻 + 开机自启（见上文「Windows 后台常驻 + 开机自启」），或 `start-hidden.vbs` 配任务计划程序。
+- **悬浮球**：安装版 exe（nsis setup）装完后默认开机自启；调试态用 `npm run widget:dev` 手动跑，关掉即退出。
+
+> ⚠️ 悬浮球是透明 + 置顶 + 无边框窗口，水波动画在球态 ~30fps、展开卡片时停。hover 状态机 200ms 轮询光标几何，已减半 IPC 开销——改壳时别再往高频轮询或常驻 `infinite` 动画里加东西。
+
 ## 功能
 
 - **顶部 4 张卡片**：今日 tokens / 今日 cost / 区间总 tokens（带 sparkline）/ 区间总 cost（带 sparkline）
@@ -92,6 +119,13 @@ UI 自动按 `event.source` 着色和分组，无需改动。
 ## 项目结构
 
 ```
+src-tauri/                      # Tauri 桌面外壳（悬浮球）
+├─ src/lib.rs                 # Rust 主进程：窗口/托盘/fetch_usage 直连 3002
+├─ tauri.conf.json            # Tauri 配置（无边框透明置顶窗口，nsis bundle）
+└─ icons/                     # 应用图标
+tauri-ui/
+└─ index.html                 # 悬浮球 UI（玻璃球水波/展开卡片/贴边三态，4 主题）
+
 src/
 ├─ app/
 │  ├─ api/
