@@ -5,8 +5,10 @@ export function SourceSplit({ today }: { today: UsageSnapshot["today"] }) {
   const total = Math.max(1, today.totalTokens);
   const claude = today.bySource["claude-code"];
   const codex = today.bySource.codex;
+  const hermes = today.bySource.hermes;
   const claudePct = (claude.tokens / total) * 100;
   const codexPct = (codex.tokens / total) * 100;
+  const hermesPct = (hermes.tokens / total) * 100;
 
   return (
     <div className="card p-5">
@@ -22,10 +24,15 @@ export function SourceSplit({ today }: { today: UsageSnapshot["today"] }) {
           className="h-full bg-gradient-to-r from-[#a78bfa] to-[#c4b5fd] transition-[width] duration-700"
           style={{ width: `${codexPct}%` }}
         />
+        <div
+          className="h-full bg-gradient-to-r from-[#38bdf8] to-[#7dd3fc] transition-[width] duration-700"
+          style={{ width: `${hermesPct}%` }}
+        />
       </div>
       <div className="mt-4 grid grid-cols-2 gap-4">
         <Row label="Claude Code" tokens={claude.tokens} cost={claude.costUSD} sessions={claude.sessions} dot="#d97757" pct={claudePct} />
         <Row label="Codex CLI" tokens={codex.tokens} cost={codex.costUSD} sessions={codex.sessions} dot="#a78bfa" pct={codexPct} />
+        <Row label="Hermes" tokens={hermes.tokens} cost={hermes.costUSD} sessions={hermes.sessions} dot="#38bdf8" pct={hermesPct} />
       </div>
     </div>
   );

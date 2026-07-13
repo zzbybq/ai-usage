@@ -16,6 +16,7 @@ export function DailyChart({ data, metric }: Props) {
     date: d.date,
     claude: metric === "tokens" ? d.bySource["claude-code"].tokens : d.bySource["claude-code"].costUSD,
     codex: metric === "tokens" ? d.bySource.codex.tokens : d.bySource.codex.costUSD,
+    hermes: metric === "tokens" ? d.bySource.hermes.tokens : d.bySource.hermes.costUSD,
     total: metric === "tokens" ? d.totalTokens : d.costUSD,
   }));
 
@@ -30,6 +31,10 @@ export function DailyChart({ data, metric }: Props) {
           <linearGradient id="g-codex" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#d8caff" stopOpacity={1} />
             <stop offset="100%" stopColor="#9b7bf2" stopOpacity={0.85} />
+          </linearGradient>
+          <linearGradient id="g-hermes" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#7dd3fc" stopOpacity={1} />
+            <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.85} />
           </linearGradient>
         </defs>
         <CartesianGrid stroke="rgba(63,63,70,0.35)" vertical={false} />
@@ -54,20 +59,22 @@ export function DailyChart({ data, metric }: Props) {
           content={({ active, payload }) => {
             if (!active || !payload || !payload.length) return null;
             const row = (payload[0] as unknown as TooltipPayload).payload as unknown as {
-              date: string; claude: number; codex: number; total: number;
+              date: string; claude: number; codex: number; hermes: number; total: number;
             };
             return (
               <div className="card !rounded-lg !border-zinc-700/70 px-3 py-2 text-xs num shadow-xl">
                 <div className="text-zinc-300 mb-1.5 font-medium">{fmtShortDay(row.date)}</div>
                 <div className="flex items-center gap-2"><span className="size-2 rounded-full bg-[#d97757]" />Claude <span className="ml-auto text-zinc-100">{metric === "tokens" ? fmtTokens(row.claude) : fmtCost(row.claude)}</span></div>
                 <div className="flex items-center gap-2 mt-1"><span className="size-2 rounded-full bg-[#a78bfa]" />Codex <span className="ml-auto text-zinc-100">{metric === "tokens" ? fmtTokens(row.codex) : fmtCost(row.codex)}</span></div>
+                <div className="flex items-center gap-2 mt-1"><span className="size-2 rounded-full bg-[#38bdf8]" />Hermes <span className="ml-auto text-zinc-100">{metric === "tokens" ? fmtTokens(row.hermes) : fmtCost(row.hermes)}</span></div>
                 <div className="mt-1.5 pt-1.5 border-t border-zinc-700/50 flex items-center gap-2 text-zinc-300">Total <span className="ml-auto text-zinc-50 font-medium">{metric === "tokens" ? fmtTokens(row.total) : fmtCost(row.total)}</span></div>
               </div>
             );
           }}
         />
         <Bar dataKey="claude" stackId="s" fill="url(#g-claude)" radius={[0, 0, 0, 0]} />
-        <Bar dataKey="codex" stackId="s" fill="url(#g-codex)" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="codex" stackId="s" fill="url(#g-codex)" radius={[0, 0, 0, 0]} />
+        <Bar dataKey="hermes" stackId="s" fill="url(#g-hermes)" radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );

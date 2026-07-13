@@ -1,5 +1,6 @@
 import { readClaudeUsage } from "./sources/claude";
 import { readCodexUsage } from "./sources/codex";
+import { readHermesUsage } from "./sources/hermes";
 import type { UsageEvent, UsageSnapshot, SourceId, DailyBucket, ModelBreakdown } from "./types";
 
 function localDayKey(date: Date): string {
@@ -24,6 +25,7 @@ function emptySourceMap(): Record<SourceId, { tokens: number; costUSD: number; s
   return {
     "claude-code": { tokens: 0, costUSD: 0, sessions: 0 },
     codex: { tokens: 0, costUSD: 0, sessions: 0 },
+    hermes: { tokens: 0, costUSD: 0, sessions: 0 },
   };
 }
 
@@ -39,6 +41,7 @@ function emptyDaily(date: string): DailyBucket {
     bySource: {
       "claude-code": { tokens: 0, costUSD: 0 },
       codex: { tokens: 0, costUSD: 0 },
+      hermes: { tokens: 0, costUSD: 0 },
     },
   };
 }
@@ -54,9 +57,10 @@ export async function buildSnapshot(daysBack = 30): Promise<UsageSnapshot> {
   const sourceSinceDate = localDayKey(addLocalDays(today, -daysBack - 1));
 
   const warnings: string[] = [];
-  const [claudeRes, codexRes] = await Promise.allSettled([
+  const [claudeRes, codexRes, hermesRes] = await Promise.allSettled([
     readClaudeUsage(sourceSinceDate),
     readCodexUsage(sourceSinceDate),
+    readHermesUsage(sourceSinceDate),
   ]);
 
   const events: UsageEvent[] = [];
@@ -78,6 +82,9 @@ export async function buildSnapshot(daysBack = 30): Promise<UsageSnapshot> {
     }
   } else warnings.push(`Codex source failed: ${String(codexRes.reason)}`);
 
+  if (hermesRes.status === "fulfilled") events.push(...hermesRes.value);
+  else warnings.push(`Hermes source failed: ${String(hermesRes.reason)}`);
+
   const dailyMap = new Map<string, DailyBucket>();
   for (let i = 0; i <= daysBack; i++) {
     const d = localDayKey(addLocalDays(today, -i));
@@ -93,10 +100,12 @@ export async function buildSnapshot(daysBack = 30): Promise<UsageSnapshot> {
   const sessionsPerSource: Record<SourceId, Set<string>> = {
     "claude-code": new Set(),
     codex: new Set(),
+    hermes: new Set(),
   };
   const todaySessionsPerSource: Record<SourceId, Set<string>> = {
     "claude-code": new Set(),
     codex: new Set(),
+    hermes: new Set(),
   };
   const modelSessions = new Map<string, Set<string>>();
 
@@ -191,6 +200,11 @@ export async function buildSnapshot(daysBack = 30): Promise<UsageSnapshot> {
           tokens: todayBySource.codex.tokens,
           costUSD: todayBySource.codex.costUSD,
           sessions: todaySessionsPerSource.codex.size,
+        },
+        hermes: {
+          tokens: todayBySource.hermes.tokens,
+          costUSD: todayBySource.hermes.costUSD,
+          sessions: todaySessionsPerSource.hermes.size,
         },
       },
     },

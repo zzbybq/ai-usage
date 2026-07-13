@@ -5,6 +5,7 @@ import { clsx } from "clsx";
 const SOURCE_LABEL: Record<SourceId, { label: string; cls: string }> = {
   "claude-code": { label: "Claude", cls: "bg-[#d97757]/15 text-[#f4a583] ring-1 ring-inset ring-[#d97757]/30" },
   codex: { label: "Codex", cls: "bg-[#a78bfa]/15 text-[#c4b5fd] ring-1 ring-inset ring-[#a78bfa]/30" },
+  hermes: { label: "Hermes", cls: "bg-[#38bdf8]/15 text-[#7dd3fc] ring-1 ring-inset ring-[#38bdf8]/30" },
 };
 
 export function ModelTable({ models }: { models: ModelBreakdown[] }) {
@@ -48,7 +49,9 @@ export function ModelTable({ models }: { models: ModelBreakdown[] }) {
                     <div
                       className={clsx(
                         "h-full rounded-full",
-                        m.source === "claude-code" ? "bg-gradient-to-r from-[#d97757] to-[#f0a378]" : "bg-gradient-to-r from-[#a78bfa] to-[#c4b5fd]"
+                        m.source === "claude-code" ? "bg-gradient-to-r from-[#d97757] to-[#f0a378]" :
+                        m.source === "hermes" ? "bg-gradient-to-r from-[#38bdf8] to-[#7dd3fc]" :
+                        "bg-gradient-to-r from-[#a78bfa] to-[#c4b5fd]"
                       )}
                       style={{ width: `${pct}%` }}
                     />

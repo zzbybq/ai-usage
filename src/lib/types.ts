@@ -1,4 +1,4 @@
-export type SourceId = "claude-code" | "codex";
+export type SourceId = "claude-code" | "codex" | "hermes";
 
 export type UsageEvent = {
   source: SourceId;
@@ -75,4 +75,5 @@ export type UsageSnapshot = {
 export const SOURCES: SourceMeta[] = [
   { id: "claude-code", label: "Claude Code", accent: "#d97757" },
   { id: "codex", label: "Codex CLI", accent: "#a78bfa" },
+  { id: "hermes", label: "Hermes", accent: "#38bdf8" },
 ];
