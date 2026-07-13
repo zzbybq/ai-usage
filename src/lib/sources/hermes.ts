@@ -15,10 +15,21 @@ function epochToMs(value: unknown): number | null {
   return Number.isFinite(number) && number > 0 ? Math.floor(number * 1000) : null;
 }
 
+function findHermesDb(): string | null {
+  const primary = path.join(os.homedir(), ".hermes", "state.db");
+  if (existsSync(primary)) return primary;
+  if (process.platform !== "win32" || !process.env.LOCALAPPDATA) return null;
+  for (const directory of ["hermes", "Hermes"]) {
+    const fallback = path.join(process.env.LOCALAPPDATA, directory, "state.db");
+    if (existsSync(fallback)) return fallback;
+  }
+  return null;
+}
+
 /** Read cumulative session usage from the active Hermes database. */
 export async function readHermesUsage(sinceDate: string): Promise<UsageEvent[]> {
-  const dbPath = path.join(os.homedir(), ".hermes", "state.db");
-  if (!existsSync(dbPath)) return [];
+  const dbPath = findHermesDb();
+  if (!dbPath) return [];
 
   let db: DatabaseSync;
   try {
