@@ -16,8 +16,11 @@
 |---|---|---|
 | Claude Code | `~/.claude/projects/**/*.jsonl` | `type=assistant` 行的 `message.usage`，按 `message.id` 去重 |
 | Codex CLI | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `event_msg.payload=token_count`，对累计值取差量；顺带读 `rate_limits` 做 5h / 周窗进度 |
+| Hermes | `~/.hermes/state.db`（Windows 兼容 `%LOCALAPPDATA%/Hermes/state.db`） | 会话累计 token 首次建立基线，后续通过持久化快照按本地日期记录增量 |
 
 价格表硬编码在 `src/lib/pricing.ts`，匹配不到时按模型名 fallback（含 `opus/sonnet/haiku/gpt-5/codex`）。
+
+Hermes 的差量状态默认写入 `~/.ai-usage/hermes-usage-state.json`，可用 `HERMES_USAGE_STATE_FILE` 覆盖。启用快照前已经发生的跨天用量无法精确回溯，首次观测仍沿用会话结束时间、缺失时使用开始时间作为历史基线；此后的增量会进入实际观测日。
 
 ## 启动
 
