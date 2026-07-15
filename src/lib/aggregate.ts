@@ -15,7 +15,7 @@ function addLocalDays(date: Date, days: number): Date {
   return next;
 }
 
-function ymd(iso: string): string {
+export function localDayKeyFromIso(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso.slice(0, 10);
   return localDayKey(date);
@@ -113,7 +113,7 @@ export async function buildSnapshot(daysBack = 30): Promise<UsageSnapshot> {
   let totalTokens = 0, totalCost = 0;
 
   for (const e of events) {
-    const day = ymd(e.timestamp);
+    const day = localDayKeyFromIso(e.timestamp);
     const tokens = eventTokens(e);
     totalTokens += tokens;
     totalCost += e.costUSD;

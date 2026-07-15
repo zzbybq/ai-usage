@@ -35,6 +35,8 @@ export default function Page() {
   }, [range]);
 
   useEffect(() => {
+    // Initial synchronization with the local usage API.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
     const id = setInterval(fetchData, 15_000);
     return () => clearInterval(id);
@@ -42,6 +44,11 @@ export default function Page() {
 
   const daily = useMemo(() => data?.daily ?? [], [data]);
   const recent = useMemo(() => daily.slice(-range), [daily, range]);
+  const todayCacheRead = data?.today.cacheReadTokens ?? 0;
+  const todayCacheWrite = data?.today.cacheCreateTokens ?? 0;
+  const todayCache = todayCacheRead + todayCacheWrite;
+  const todayTotal = data?.today.totalTokens ?? 0;
+  const todayCachePct = todayTotal > 0 ? (todayCache / todayTotal) * 100 : 0;
 
   return (
     <main className="relative mx-auto w-full max-w-[1400px] px-6 lg:px-10 py-8">
@@ -64,14 +71,16 @@ export default function Page() {
       <section className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           accent="claude"
-          label="Today · Tokens"
+          label="Today · Total Tokens (incl. cache)"
           icon={<Sparkles size={16} />}
-          value={fmtTokens(data?.today.totalTokens ?? 0)}
+          value={fmtTokens(todayTotal)}
           sub={
             <span className="num">
-              In {fmtTokens(data?.today.inputTokens ?? 0)} ·
+              Non-cache in {fmtTokens(data?.today.inputTokens ?? 0)} ·
+              Cache read {fmtTokens(todayCacheRead)} ·
+              Cache write {fmtTokens(todayCacheWrite)} ·
               Out {fmtTokens(data?.today.outputTokens ?? 0)} ·
-              Cache {fmtTokens((data?.today.cacheCreateTokens ?? 0) + (data?.today.cacheReadTokens ?? 0))}
+              Cache {todayCachePct.toFixed(1)}%
             </span>
           }
         />

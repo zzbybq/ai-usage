@@ -7,12 +7,40 @@ import { costFor } from "../pricing";
 import type { UsageEvent } from "../types";
 
 const CODEX_DIR = path.join(os.homedir(), ".codex", "sessions");
+const SESSION_ID_RE = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 
 /** Parse a token field to a non-negative integer (0 for missing/garbage). */
 function toInt(v: unknown): number {
   const n = Math.floor(Number(v));
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
+
+type TokenCounters = {
+  input: number;
+  output: number;
+  cached: number;
+  total: number;
+};
+
+type TokenCountRow = {
+  timestamp: string;
+  cumulative?: TokenCounters;
+  last?: TokenCounters;
+  rateLimits?: Record<string, unknown>;
+};
+
+type ParsedSession = {
+  file: string;
+  sessionId: string;
+  model: string;
+  project?: string;
+  threadSource?: string;
+  parentThreadId?: string;
+  forkedFromId?: string;
+  rows: TokenCountRow[];
+  cumulativeSnapshots: TokenCounters[];
+  included: boolean;
+};
 
 async function walkJsonl(root: string): Promise<string[]> {
   const out: string[] = [];
@@ -30,7 +58,165 @@ async function walkJsonl(root: string): Promise<string[]> {
     }
   }
   await walk(root);
-  return out;
+  return out.sort();
+}
+
+function sessionIdFromFile(file: string): string {
+  return path.basename(file).match(SESSION_ID_RE)?.[1] ?? path.basename(file, ".jsonl");
+}
+
+function textValue(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  return text || undefined;
+}
+
+function tokenCounters(value: Record<string, unknown>): TokenCounters {
+  const input = toInt(value.input_tokens);
+  const output = toInt(value.output_tokens);
+  const cached = toInt(value.cached_input_tokens ?? value.cache_read_input_tokens);
+  return {
+    input,
+    output,
+    cached,
+    total: toInt(value.total_tokens) || input + output,
+  };
+}
+
+async function parseSession(file: string, included: boolean): Promise<ParsedSession> {
+  const fileSessionId = sessionIdFromFile(file);
+  let sessionId = fileSessionId;
+  let model = "gpt-5";
+  let project: string | undefined;
+  let threadSource: string | undefined;
+  let parentThreadId: string | undefined;
+  let forkedFromId: string | undefined;
+  let ownerMetadataRead = false;
+  const rows: TokenCountRow[] = [];
+  const cumulativeSnapshots: TokenCounters[] = [];
+
+  const rl = readline.createInterface({
+    input: createReadStream(file, { encoding: "utf8" }),
+    crlfDelay: Infinity,
+  });
+
+  for await (const line of rl) {
+    if (!line) continue;
+    let row: Record<string, unknown>;
+    try {
+      row = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const type = row.type as string;
+    const payload = row.payload as Record<string, unknown> | undefined;
+
+    // A forked rollout can replay its parent's session_meta later in the file.
+    // Only the first metadata row owns the file; replayed metadata must never
+    // overwrite the child's identity or parent relationship.
+    if (type === "session_meta" && payload && !ownerMetadataRead) {
+      ownerMetadataRead = true;
+      sessionId = textValue(payload.id) ?? textValue(payload.session_id) ?? fileSessionId;
+      project = textValue(payload.cwd);
+      model = textValue(payload.model) ?? model;
+      threadSource = textValue(payload.thread_source)?.toLowerCase();
+      parentThreadId = textValue(payload.parent_thread_id);
+      forkedFromId = textValue(payload.forked_from_id ?? payload.forked_from);
+      continue;
+    }
+
+    if (type !== "event_msg" || !payload || payload.type !== "token_count") continue;
+
+    const info = payload.info as Record<string, unknown> | null | undefined;
+    const totalUsage = info?.total_token_usage as Record<string, unknown> | undefined;
+    const lastUsage = info?.last_token_usage as Record<string, unknown> | undefined;
+    const tokenRow: TokenCountRow = {
+      timestamp: textValue(row.timestamp) ?? "",
+      rateLimits: payload.rate_limits as Record<string, unknown> | undefined,
+    };
+    if (totalUsage) {
+      tokenRow.cumulative = tokenCounters(totalUsage);
+      cumulativeSnapshots.push(tokenRow.cumulative);
+    } else if (lastUsage) {
+      tokenRow.last = tokenCounters(lastUsage);
+    }
+    rows.push(tokenRow);
+  }
+
+  return {
+    file,
+    sessionId,
+    model,
+    project,
+    threadSource,
+    parentThreadId,
+    forkedFromId,
+    rows,
+    cumulativeSnapshots,
+    included,
+  };
+}
+
+function sameSnapshot(left: TokenCounters, right: TokenCounters): boolean {
+  return (
+    left.input === right.input &&
+    left.output === right.output &&
+    left.cached === right.cached &&
+    left.total === right.total
+  );
+}
+
+/**
+ * Find the longest child prefix that appears contiguously anywhere in the
+ * explicitly linked parent's cumulative snapshot sequence.
+ */
+export function findReplayPrefixLength(
+  child: TokenCounters[],
+  parent: TokenCounters[]
+): number {
+  let longest = 0;
+  for (let parentStart = 0; parentStart < parent.length; parentStart += 1) {
+    let matched = 0;
+    while (
+      matched < child.length &&
+      parentStart + matched < parent.length &&
+      sameSnapshot(child[matched], parent[parentStart + matched])
+    ) {
+      matched += 1;
+    }
+    longest = Math.max(longest, matched);
+  }
+  return longest;
+}
+
+function resolveParentId(session: ParsedSession): string | undefined {
+  if (session.threadSource !== "subagent") return undefined;
+  if (
+    session.parentThreadId &&
+    session.forkedFromId &&
+    session.parentThreadId !== session.forkedFromId
+  ) {
+    return undefined;
+  }
+  return session.parentThreadId ?? session.forkedFromId;
+}
+
+function cumulativeDelta(current: TokenCounters, previous: TokenCounters): TokenCounters {
+  let input = Math.max(0, current.input - previous.input);
+  let output = Math.max(0, current.output - previous.output);
+  let cached = Math.max(0, current.cached - previous.cached);
+
+  // Preserve the existing compaction/reset behavior: when the cumulative
+  // counter drops and a plain delta would lose the segment, count the new
+  // snapshot itself and re-baseline.
+  const isReset = previous.total > 0 && current.total > 0 && current.total < previous.total;
+  if (input + output === 0 && isReset) {
+    input = current.input;
+    output = current.output;
+    cached = current.cached;
+  }
+
+  return { input, output, cached, total: input + output };
 }
 
 export type CodexRateLimit = {
@@ -42,153 +228,122 @@ export type CodexRateLimit = {
   observedAt: string;
 };
 
-export async function readCodexUsage(
+function observedRateLimit(
+  rateLimits: Record<string, unknown>,
+  timestamp: string
+): CodexRateLimit {
+  const primary = rateLimits.primary as Record<string, unknown> | undefined;
+  const secondary = rateLimits.secondary as Record<string, unknown> | undefined;
+  return {
+    primaryUsedPercent: primary ? Number(primary.used_percent) : undefined,
+    primaryResetsAt: primary?.resets_at
+      ? new Date(Number(primary.resets_at) * 1000).toISOString()
+      : undefined,
+    secondaryUsedPercent: secondary ? Number(secondary.used_percent) : undefined,
+    secondaryResetsAt: secondary?.resets_at
+      ? new Date(Number(secondary.resets_at) * 1000).toISOString()
+      : undefined,
+    planType: rateLimits.plan_type as string | undefined,
+    observedAt: timestamp,
+  };
+}
+
+export async function readCodexUsageFromDirectory(
+  root: string,
   sinceDate: string
 ): Promise<{ events: UsageEvent[]; latestRateLimit: CodexRateLimit | null }> {
-  const files = await walkJsonl(CODEX_DIR);
+  const files = await walkJsonl(root);
   const since = new Date(sinceDate + "T00:00:00.000Z").getTime();
+  const fileIndex = new Map(files.map((file) => [sessionIdFromFile(file), file]));
+  const parsedByFile = new Map<string, ParsedSession>();
+
+  // First parse the same mtime-selected rollout set as before.
+  for (const file of files) {
+    const stat = await fs.stat(file).catch(() => null);
+    if (!stat || stat.mtimeMs < since) continue;
+    parsedByFile.set(file, await parseSession(file, true));
+  }
+
+  // Then load explicitly referenced parents as comparison-only sessions even
+  // when their mtime falls outside the requested window. Missing parents are a
+  // safe fallback: the child retains the current per-file delta behavior.
+  for (const session of [...parsedByFile.values()]) {
+    const parentId = resolveParentId(session);
+    const parentFile = parentId ? fileIndex.get(parentId) : undefined;
+    if (!parentFile || parsedByFile.has(parentFile)) continue;
+    parsedByFile.set(parentFile, await parseSession(parentFile, false));
+  }
+
+  const sessions = [...parsedByFile.values()];
+  const bySessionId = new Map(sessions.map((session) => [session.sessionId, session]));
+  const replayPrefixBySession = new Map<string, number>();
+  for (const session of sessions) {
+    const parentId = resolveParentId(session);
+    const parent = parentId ? bySessionId.get(parentId) : undefined;
+    if (!parent) continue;
+    const replayLength = findReplayPrefixLength(
+      session.cumulativeSnapshots,
+      parent.cumulativeSnapshots
+    );
+    if (replayLength > 0) replayPrefixBySession.set(session.file, replayLength);
+  }
+
   const events: UsageEvent[] = [];
   let latest: CodexRateLimit | null = null;
 
-  for (const file of files) {
-    const stat = await fs.stat(file).catch(() => null);
-    if (!stat) continue;
-    if (stat.mtimeMs < since) continue;
+  for (const session of sessions) {
+    if (!session.included) continue;
+    let baseline: TokenCounters = { input: 0, output: 0, cached: 0, total: 0 };
+    let cumulativeIndex = 0;
+    const replayPrefixLength = replayPrefixBySession.get(session.file) ?? 0;
 
-    const sessionId = path.basename(file).replace(/^rollout-.*-([0-9a-f-]{36})\.jsonl$/, "$1");
-
-    let sessionModel = "gpt-5";
-    let project: string | undefined;
-    // Running baseline of the session's cumulative token_usage snapshot.
-    let baseInput = 0;
-    let baseOutput = 0;
-    let baseCached = 0;
-    let baseTotal = 0;
-
-    const rl = readline.createInterface({
-      input: createReadStream(file, { encoding: "utf8" }),
-      crlfDelay: Infinity,
-    });
-
-    for await (const line of rl) {
-      if (!line) continue;
-      let row: Record<string, unknown>;
-      try {
-        row = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      const type = row.type as string;
-      const payload = row.payload as Record<string, unknown> | undefined;
-
-      if (type === "session_meta" && payload) {
-        const cwd = payload.cwd as string | undefined;
-        if (cwd) project = cwd;
-        const model = payload.model as string | undefined;
-        if (model) sessionModel = model;
-        continue;
+    for (const row of session.rows) {
+      let delta: TokenCounters | undefined;
+      let isReplay = false;
+      if (row.cumulative) {
+        delta = cumulativeDelta(row.cumulative, baseline);
+        baseline = row.cumulative;
+        isReplay = cumulativeIndex < replayPrefixLength;
+        cumulativeIndex += 1;
+      } else if (row.last) {
+        delta = row.last;
       }
 
-      if (type === "event_msg" && payload && payload.type === "token_count") {
-        const ts = (row.timestamp as string) ?? "";
-        const info = payload.info as Record<string, unknown> | null | undefined;
-        if (info) {
-          const totalUsage = info.total_token_usage as
-            | Record<string, unknown>
-            | undefined;
-          const lastUsage = info.last_token_usage as
-            | Record<string, unknown>
-            | undefined;
-
-          let dInput = 0;
-          let dOutput = 0;
-          let dCached = 0;
-
-          if (totalUsage) {
-            // total_token_usage is cumulative for the session — take the delta
-            // against the running baseline. Codex occasionally RESETS the
-            // counter mid-session (e.g. context compaction / a fresh segment);
-            // when the cumulative total drops, the plain delta would be 0 and
-            // we'd silently lose those tokens. Detect the drop and treat the
-            // new snapshot itself as the increment, then re-baseline.
-            const curInput = toInt(totalUsage.input_tokens);
-            const curOutput = toInt(totalUsage.output_tokens);
-            const curCached = toInt(
-              totalUsage.cached_input_tokens ?? totalUsage.cache_read_input_tokens
-            );
-            const curTotal = toInt(totalUsage.total_tokens) || curInput + curOutput;
-
-            dInput = Math.max(0, curInput - baseInput);
-            dOutput = Math.max(0, curOutput - baseOutput);
-            dCached = Math.max(0, curCached - baseCached);
-
-            const isReset = baseTotal > 0 && curTotal > 0 && curTotal < baseTotal;
-            if (dInput + dOutput === 0 && isReset) {
-              dInput = curInput;
-              dOutput = curOutput;
-              dCached = curCached;
-            }
-            // Advance the baseline on every cumulative snapshot, even when this
-            // event falls outside the requested window (keeps deltas correct).
-            baseInput = curInput;
-            baseOutput = curOutput;
-            baseCached = curCached;
-            baseTotal = curTotal;
-          } else if (lastUsage) {
-            // No cumulative figure on this event: last_token_usage is the
-            // per-turn usage, so count it directly rather than as a delta.
-            dInput = toInt(lastUsage.input_tokens);
-            dOutput = toInt(lastUsage.output_tokens);
-            dCached = toInt(
-              lastUsage.cached_input_tokens ?? lastUsage.cache_read_input_tokens
-            );
-          }
-
-          if (ts && dInput + dOutput > 0) {
-            const tsMs = new Date(ts).getTime();
-            if (!Number.isNaN(tsMs) && tsMs >= since) {
-              const billableInput = Math.max(0, dInput - dCached);
-              events.push({
-                source: "codex",
-                timestamp: ts,
-                model: sessionModel,
-                inputTokens: billableInput,
-                outputTokens: dOutput,
-                cacheCreateTokens: 0,
-                cacheReadTokens: dCached,
-                project,
-                sessionId,
-                costUSD: costFor(sessionModel, {
-                  input: billableInput,
-                  output: dOutput,
-                  cacheRead: dCached,
-                }),
-              });
-            }
-          }
+      if (!isReplay && delta && row.timestamp && delta.input + delta.output > 0) {
+        const timestampMs = new Date(row.timestamp).getTime();
+        if (!Number.isNaN(timestampMs) && timestampMs >= since) {
+          const billableInput = Math.max(0, delta.input - delta.cached);
+          events.push({
+            source: "codex",
+            timestamp: row.timestamp,
+            model: session.model,
+            inputTokens: billableInput,
+            outputTokens: delta.output,
+            cacheCreateTokens: 0,
+            cacheReadTokens: delta.cached,
+            project: session.project,
+            sessionId: session.sessionId,
+            costUSD: costFor(session.model, {
+              input: billableInput,
+              output: delta.output,
+              cacheRead: delta.cached,
+            }),
+          });
         }
-        const rateLimits = payload.rate_limits as Record<string, unknown> | undefined;
-        if (rateLimits && ts) {
-          const primary = rateLimits.primary as Record<string, unknown> | undefined;
-          const secondary = rateLimits.secondary as Record<string, unknown> | undefined;
-          const observed: CodexRateLimit = {
-            primaryUsedPercent: primary ? Number(primary.used_percent) : undefined,
-            primaryResetsAt: primary?.resets_at
-              ? new Date(Number(primary.resets_at) * 1000).toISOString()
-              : undefined,
-            secondaryUsedPercent: secondary ? Number(secondary.used_percent) : undefined,
-            secondaryResetsAt: secondary?.resets_at
-              ? new Date(Number(secondary.resets_at) * 1000).toISOString()
-              : undefined,
-            planType: rateLimits.plan_type as string | undefined,
-            observedAt: ts,
-          };
-          if (!latest || observed.observedAt > latest.observedAt) {
-            latest = observed;
-          }
-        }
+      }
+
+      if (row.rateLimits && row.timestamp) {
+        const observed = observedRateLimit(row.rateLimits, row.timestamp);
+        if (!latest || observed.observedAt > latest.observedAt) latest = observed;
       }
     }
   }
+
   return { events, latestRateLimit: latest };
+}
+
+export async function readCodexUsage(
+  sinceDate: string
+): Promise<{ events: UsageEvent[]; latestRateLimit: CodexRateLimit | null }> {
+  return readCodexUsageFromDirectory(CODEX_DIR, sinceDate);
 }
