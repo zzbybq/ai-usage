@@ -1,12 +1,7 @@
-import type { ModelBreakdown, SourceId } from "@/lib/types";
+import { SOURCES, type ModelBreakdown } from "@/lib/types";
 import { fmtTokens, fmtCost } from "@/lib/format";
-import { clsx } from "clsx";
 
-const SOURCE_LABEL: Record<SourceId, { label: string; cls: string }> = {
-  "claude-code": { label: "Claude", cls: "bg-[#d97757]/15 text-[#f4a583] ring-1 ring-inset ring-[#d97757]/30" },
-  codex: { label: "Codex", cls: "bg-[#a78bfa]/15 text-[#c4b5fd] ring-1 ring-inset ring-[#a78bfa]/30" },
-  hermes: { label: "Hermes", cls: "bg-[#38bdf8]/15 text-[#7dd3fc] ring-1 ring-inset ring-[#38bdf8]/30" },
-};
+const SOURCE_LABEL = new Map(SOURCES.map((source) => [source.id, source]));
 
 export function ModelTable({ models }: { models: ModelBreakdown[] }) {
   const top = models.slice(0, 10);
@@ -32,13 +27,20 @@ export function ModelTable({ models }: { models: ModelBreakdown[] }) {
         <tbody className="divide-y divide-zinc-800/60">
           {top.map((m) => {
             const pct = (m.tokens / maxTokens) * 100;
-            const s = SOURCE_LABEL[m.source];
+            const s = SOURCE_LABEL.get(m.source)!;
             return (
               <tr key={`${m.source}-${m.model}`} className="hover:bg-zinc-800/20 transition-colors">
                 <td className="py-2.5 pr-4 font-mono text-[13px] text-zinc-200">{m.model}</td>
                 <td className="py-2.5 pr-4">
-                  <span className={clsx("inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium", s.cls)}>
-                    {s.label}
+                  <span
+                    className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium"
+                    style={{
+                      backgroundColor: `${s.accent}22`,
+                      color: s.accentEnd,
+                      boxShadow: `inset 0 0 0 1px ${s.accent}4d`,
+                    }}
+                  >
+                    {s.shortLabel}
                   </span>
                 </td>
                 <td className="py-2.5 pr-4 text-right text-zinc-100">{fmtTokens(m.tokens)}</td>
@@ -46,15 +48,10 @@ export function ModelTable({ models }: { models: ModelBreakdown[] }) {
                 <td className="py-2.5 pr-4 text-right text-zinc-400">{m.sessions}</td>
                 <td className="py-2.5">
                   <div className="h-1.5 w-full bg-zinc-800/60 rounded-full overflow-hidden">
-                    <div
-                      className={clsx(
-                        "h-full rounded-full",
-                        m.source === "claude-code" ? "bg-gradient-to-r from-[#d97757] to-[#f0a378]" :
-                        m.source === "hermes" ? "bg-gradient-to-r from-[#38bdf8] to-[#7dd3fc]" :
-                        "bg-gradient-to-r from-[#a78bfa] to-[#c4b5fd]"
-                      )}
-                      style={{ width: `${pct}%` }}
-                    />
+                    <div className="h-full rounded-full" style={{
+                      width: `${pct}%`,
+                      backgroundImage: `linear-gradient(to right, ${s.accent}, ${s.accentEnd})`,
+                    }} />
                   </div>
                 </td>
               </tr>

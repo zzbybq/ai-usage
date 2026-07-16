@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Coins, Database, FlaskConical, History, Sparkles } from "lucide-react";
 import { Header } from "./_components/Header";
 import { StatCard } from "./_components/StatCard";
@@ -18,11 +18,15 @@ export default function Page() {
   const [data, setData] = useState<UsageSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestInFlight = useRef(false);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (force = false) => {
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
     setLoading(true);
     try {
-      const res = await fetch(`/api/usage?days=${range}`, { cache: "no-store" });
+      const refresh = force ? "&refresh=1" : "";
+      const res = await fetch(`/api/usage?days=${range}${refresh}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const snap = (await res.json()) as UsageSnapshot;
       setData(snap);
@@ -30,6 +34,7 @@ export default function Page() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      requestInFlight.current = false;
       setLoading(false);
     }
   }, [range]);
@@ -37,8 +42,8 @@ export default function Page() {
   useEffect(() => {
     // Initial synchronization with the local usage API.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchData();
-    const id = setInterval(fetchData, 15_000);
+    void fetchData();
+    const id = setInterval(() => void fetchData(), 60_000);
     return () => clearInterval(id);
   }, [fetchData]);
 
@@ -46,9 +51,8 @@ export default function Page() {
   const recent = useMemo(() => daily.slice(-range), [daily, range]);
   const todayCacheRead = data?.today.cacheReadTokens ?? 0;
   const todayCacheWrite = data?.today.cacheCreateTokens ?? 0;
-  const todayCache = todayCacheRead + todayCacheWrite;
   const todayTotal = data?.today.totalTokens ?? 0;
-  const todayCachePct = todayTotal > 0 ? (todayCache / todayTotal) * 100 : 0;
+  const todayCachePct = todayTotal > 0 ? (todayCacheRead / todayTotal) * 100 : 0;
 
   return (
     <main className="relative mx-auto w-full max-w-[1400px] px-6 lg:px-10 py-8">
@@ -59,7 +63,9 @@ export default function Page() {
         setMetric={setMetric}
         generatedAt={data?.generatedAt}
         loading={loading}
-        onRefresh={fetchData}
+        onRefresh={() => void fetchData(true)}
+        sourceCount={data?.sources.length ?? 0}
+        onSourcesChanged={() => fetchData(true)}
       />
 
       {error && (
@@ -71,17 +77,42 @@ export default function Page() {
       <section className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           accent="claude"
-          label="Today · Total Tokens (incl. cache)"
+          label="Today · Tokens"
           icon={<Sparkles size={16} />}
           value={fmtTokens(todayTotal)}
           sub={
-            <span className="num">
-              Non-cache in {fmtTokens(data?.today.inputTokens ?? 0)} ·
-              Cache read {fmtTokens(todayCacheRead)} ·
-              Cache write {fmtTokens(todayCacheWrite)} ·
-              Out {fmtTokens(data?.today.outputTokens ?? 0)} ·
-              Cache {todayCachePct.toFixed(1)}%
-            </span>
+            <div className="num">
+              <div className="grid grid-cols-3 divide-x divide-zinc-800/80">
+                <div className="pr-2">
+                  <span className="block text-[9px] uppercase tracking-[0.12em] text-zinc-600">Input</span>
+                  <span className="mt-0.5 block text-[13px] font-medium text-zinc-300">
+                    {fmtTokens(data?.today.inputTokens ?? 0)}
+                  </span>
+                </div>
+                <div className="px-2">
+                  <span className="block text-[9px] uppercase tracking-[0.12em] text-zinc-600">Output</span>
+                  <span className="mt-0.5 block text-[13px] font-medium text-zinc-300">
+                    {fmtTokens(data?.today.outputTokens ?? 0)}
+                  </span>
+                </div>
+                <div className="pl-2">
+                  <span className="block text-[9px] uppercase tracking-[0.12em] text-zinc-600">Cached</span>
+                  <span className="mt-0.5 block text-[13px] font-medium text-zinc-300">
+                    {fmtTokens(todayCacheRead)}
+                  </span>
+                </div>
+              </div>
+              <div className="mt-2 flex min-h-5 items-center gap-2">
+                <span className="rounded-full border border-[#d97757]/25 bg-[#d97757]/8 px-2 py-0.5 text-[10px] text-[#f0a378]">
+                  {todayCachePct.toFixed(1)}% reused
+                </span>
+                {todayCacheWrite > 0 && (
+                  <span className="text-[10px] text-zinc-500">
+                    Cache write {fmtTokens(todayCacheWrite)}
+                  </span>
+                )}
+              </div>
+            </div>
           }
         />
         <StatCard
@@ -92,7 +123,7 @@ export default function Page() {
           sub={
             <span className="num">
               {data?.today.sessions ?? 0} session{(data?.today.sessions ?? 0) === 1 ? "" : "s"} ·
-              avg {fmtCost((data?.today.costUSD ?? 0) / Math.max(1, data?.today.sessions ?? 1))}/session
+              Avg ${((data?.today.costUSD ?? 0) / Math.max(1, data?.today.sessions ?? 1)).toFixed(2)}
             </span>
           }
         />
@@ -114,15 +145,9 @@ export default function Page() {
 
       <section className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
-          {data && <SourceSplit today={data.today} />}
+          {data && <SourceSplit today={data.today} sources={data.sources} />}
         </div>
-        <RateLimit
-          primaryUsedPercent={data?.rateLimit?.primaryUsedPercent}
-          primaryResetsAt={data?.rateLimit?.primaryResetsAt}
-          secondaryUsedPercent={data?.rateLimit?.secondaryUsedPercent}
-          secondaryResetsAt={data?.rateLimit?.secondaryResetsAt}
-          planType={data?.rateLimit?.planType}
-        />
+        <RateLimit limits={data?.rateLimits ?? []} referenceTime={data?.generatedAt} />
       </section>
 
       <section className="mt-4 card p-5 relative overflow-hidden">
@@ -136,13 +161,17 @@ export default function Page() {
               Last {range} days · stacked by source
             </h2>
           </div>
-          <div className="flex items-center gap-4 text-xs text-zinc-400">
-            <div className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#d97757]" />Claude Code</div>
-            <div className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#a78bfa]" />Codex CLI</div>
+          <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs text-zinc-400">
+            {(data?.sources ?? []).map((source) => (
+              <div key={source.id} className="flex items-center gap-1.5">
+                <span className="size-2 rounded-full" style={{ backgroundColor: source.accent }} />
+                {source.label}
+              </div>
+            ))}
           </div>
         </div>
         <div className="relative">
-          <DailyChart data={recent} metric={metric} />
+          <DailyChart data={recent} metric={metric} sources={data?.sources ?? []} />
         </div>
       </section>
 
@@ -180,7 +209,7 @@ export default function Page() {
       </section>
 
       <footer className="mt-6 text-[11px] text-zinc-600 num">
-        Reads <span className="font-mono text-zinc-500">~/.claude/projects</span> and <span className="font-mono text-zinc-500">~/.codex/sessions</span> directly. No data leaves your machine.
+        Reads selected sources from local usage stores. No conversation data leaves your machine.
       </footer>
     </main>
   );

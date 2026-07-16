@@ -12,14 +12,14 @@
   --color-accent-emerald: #34d399;
   --color-accent-amber: #fbbf24;
   --color-accent-rose: #fb7185;
-  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: var(--font-geist-sans), "Microsoft YaHei UI", "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 }
 
 html, body {
   background: #09090b;
   color: #fafafa;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-geist-sans), "Microsoft YaHei UI", "Segoe UI", sans-serif;
 }
 
 body {
@@ -60,6 +60,11 @@ body {
 }
 .live-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
 
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(113, 113, 122, 0.65) transparent;
+  scrollbar-gutter: stable;
+}
 .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
-.scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(82, 82, 91, 0.5); border-radius: 4px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(113, 113, 122, 0.65); border-radius: 4px; }
 .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }

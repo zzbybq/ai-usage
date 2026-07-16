@@ -27,6 +27,8 @@ const TABLE: Record<string, ModelPricing> = {
   "o4-mini": { input: 1.1 / M, output: 4.4 / M, cacheRead: 0.275 / M },
   "o3": { input: 2 / M, output: 8 / M, cacheRead: 0.5 / M },
   "o3-mini": { input: 1.1 / M, output: 4.4 / M, cacheRead: 0.55 / M },
+  "glm-5.2": { input: 0.07 / M, output: 0.07 / M, cacheRead: 0.007 / M },
+  "glm-5.1": { input: 0.07 / M, output: 0.07 / M, cacheRead: 0.007 / M },
 };
 
 const FALLBACK: ModelPricing = { input: 3 / M, output: 15 / M, cacheCreate: 3.75 / M, cacheRead: 0.3 / M };
@@ -41,6 +43,7 @@ function resolve(model: string): ModelPricing {
   if (key.includes("sonnet")) return TABLE["claude-sonnet-4-6"];
   if (key.includes("haiku")) return TABLE["claude-haiku-4-5"];
   if (key.includes("gpt-5") || key.includes("codex")) return TABLE["gpt-5"];
+  if (key.includes("glm")) return TABLE["glm-5.2"];
   return FALLBACK;
 }
 

@@ -49,7 +49,13 @@ function total(counters: HermesCounters): number {
   return counters.inputTokens + counters.outputTokens + counters.cacheCreateTokens + counters.cacheReadTokens;
 }
 
-function addEvent(state: HermesUsageState, session: ObservedHermesSession, timestampMs: number, counters: HermesCounters, costUSD: number): void {
+function addEvent(
+  state: HermesUsageState,
+  session: ObservedHermesSession,
+  timestampMs: number,
+  counters: HermesCounters,
+  costUSD: number
+): void {
   if (total(counters) === 0) return;
   const key = `${localDayKey(timestampMs)}\u0000${session.id}\u0000${session.model}`;
   const existing = state.events[key];
@@ -63,11 +69,22 @@ function addEvent(state: HermesUsageState, session: ObservedHermesSession, times
     existing.project = session.project;
     return;
   }
-  state.events[key] = { ...counters, timestamp: new Date(timestampMs).toISOString(), model: session.model, project: session.project, sessionId: session.id, costUSD };
+  state.events[key] = {
+    ...counters,
+    timestamp: new Date(timestampMs).toISOString(),
+    model: session.model,
+    project: session.project,
+    sessionId: session.id,
+    costUSD,
+  };
 }
 
 /** Convert cumulative Hermes counters into an idempotent, per-local-day ledger. */
-export function reconcileHermesUsage(state: HermesUsageState, sessions: ObservedHermesSession[], nowMs: number): HermesUsageState {
+export function reconcileHermesUsage(
+  state: HermesUsageState,
+  sessions: ObservedHermesSession[],
+  nowMs: number
+): HermesUsageState {
   for (const session of sessions) {
     const previous = state.sessions[session.id];
     if (!previous) {
@@ -75,7 +92,11 @@ export function reconcileHermesUsage(state: HermesUsageState, sessions: Observed
       // after this baseline is split accurately by the snapshot day.
       addEvent(state, session, session.classifyMs, session, session.resolvedCostUSD);
     } else {
-      const reset = session.inputTokens < previous.inputTokens || session.outputTokens < previous.outputTokens || session.cacheCreateTokens < previous.cacheCreateTokens || session.cacheReadTokens < previous.cacheReadTokens;
+      const reset =
+        session.inputTokens < previous.inputTokens ||
+        session.outputTokens < previous.outputTokens ||
+        session.cacheCreateTokens < previous.cacheCreateTokens ||
+        session.cacheReadTokens < previous.cacheReadTokens;
       if (!reset) {
         const delta: HermesCounters = {
           inputTokens: session.inputTokens - previous.inputTokens,
@@ -83,7 +104,13 @@ export function reconcileHermesUsage(state: HermesUsageState, sessions: Observed
           cacheCreateTokens: session.cacheCreateTokens - previous.cacheCreateTokens,
           cacheReadTokens: session.cacheReadTokens - previous.cacheReadTokens,
         };
-        addEvent(state, session, nowMs, delta, Math.max(session.resolvedCostUSD - previous.resolvedCostUSD, 0));
+        addEvent(
+          state,
+          session,
+          nowMs,
+          delta,
+          Math.max(session.resolvedCostUSD - previous.resolvedCostUSD, 0)
+        );
       }
     }
     state.sessions[session.id] = {

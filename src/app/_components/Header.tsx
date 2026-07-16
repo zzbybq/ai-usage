@@ -3,6 +3,7 @@
 import { Activity, RefreshCw } from "lucide-react";
 import { fmtRelative } from "@/lib/format";
 import { clsx } from "clsx";
+import { SourcePicker } from "./SourcePicker";
 
 type Props = {
   range: 7 | 30 | 90;
@@ -12,9 +13,11 @@ type Props = {
   generatedAt?: string;
   loading: boolean;
   onRefresh: () => void;
+  sourceCount: number;
+  onSourcesChanged: () => void | Promise<void>;
 };
 
-export function Header({ range, setRange, metric, setMetric, generatedAt, loading, onRefresh }: Props) {
+export function Header({ range, setRange, metric, setMetric, generatedAt, loading, onRefresh, sourceCount, onSourcesChanged }: Props) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 pb-2">
       <div className="flex items-center gap-3">
@@ -34,6 +37,7 @@ export function Header({ range, setRange, metric, setMetric, generatedAt, loadin
       </div>
 
       <div className="flex items-center gap-2">
+        <SourcePicker selectedCount={sourceCount} onSaved={onSourcesChanged} />
         <Segmented
           value={metric}
           options={[

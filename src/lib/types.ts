@@ -1,4 +1,14 @@
-export type SourceId = "claude-code" | "codex" | "hermes";
+export const SOURCES = [
+  { id: "claude-code", label: "Claude Code", shortLabel: "Claude", accent: "#d97757", accentEnd: "#f0a378" },
+  { id: "codex", label: "Codex CLI", shortLabel: "Codex", accent: "#a78bfa", accentEnd: "#c4b5fd" },
+  { id: "workbuddy", label: "WorkBuddy", shortLabel: "WorkBuddy", accent: "#34d399", accentEnd: "#6ee7b7" },
+  { id: "hermes", label: "Hermes", shortLabel: "Hermes", accent: "#38bdf8", accentEnd: "#7dd3fc" },
+  { id: "gemini-cli", label: "Gemini CLI", shortLabel: "Gemini", accent: "#4285f4", accentEnd: "#8ab4f8" },
+  { id: "opencode", label: "OpenCode", shortLabel: "OpenCode", accent: "#f59e0b", accentEnd: "#fcd34d" },
+  { id: "cline", label: "Cline", shortLabel: "Cline", accent: "#f43f5e", accentEnd: "#fda4af" },
+] as const;
+
+export type SourceId = (typeof SOURCES)[number]["id"];
 
 export type UsageEvent = {
   source: SourceId;
@@ -17,7 +27,14 @@ export type UsageEvent = {
 export type SourceMeta = {
   id: SourceId;
   label: string;
+  shortLabel: string;
   accent: string;
+  accentEnd: string;
+};
+
+export type SourceStatus = SourceMeta & {
+  selected: boolean;
+  detected: boolean;
 };
 
 export type DailyBucket = {
@@ -41,6 +58,7 @@ export type ModelBreakdown = {
 
 export type UsageSnapshot = {
   generatedAt: string;
+  sources: SourceMeta[];
   today: {
     date: string;
     totalTokens: number;
@@ -61,19 +79,17 @@ export type UsageSnapshot = {
   daily: DailyBucket[];
   models: ModelBreakdown[];
   todayModels: ModelBreakdown[];
-  rateLimit?: {
+  rateLimits: Array<{
     source: SourceId;
-    primaryUsedPercent?: number;
-    primaryResetsAt?: string;
-    secondaryUsedPercent?: number;
-    secondaryResetsAt?: string;
+    limitId: string;
+    limitName?: string;
     planType?: string;
-  } | null;
+    observedAt: string;
+    windows: Array<{
+      usedPercent?: number;
+      windowMinutes?: number;
+      resetsAt?: string;
+    }>;
+  }>;
   warnings: string[];
 };
-
-export const SOURCES: SourceMeta[] = [
-  { id: "claude-code", label: "Claude Code", accent: "#d97757" },
-  { id: "codex", label: "Codex CLI", accent: "#a78bfa" },
-  { id: "hermes", label: "Hermes", accent: "#38bdf8" },
-];

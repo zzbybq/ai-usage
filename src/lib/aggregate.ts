@@ -1,7 +1,6 @@
-import { readClaudeUsage } from "./sources/claude";
-import { readCodexUsage } from "./sources/codex";
-import { readHermesUsage } from "./sources/hermes";
-import type { UsageEvent, UsageSnapshot, SourceId, DailyBucket, ModelBreakdown } from "./types";
+import { SOURCE_REGISTRY } from "./source-registry";
+import { readSelectedSourceIds } from "./source-settings";
+import { SOURCES, type UsageEvent, type UsageSnapshot, type SourceId, type DailyBucket, type ModelBreakdown } from "./types";
 
 function localDayKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
@@ -22,11 +21,15 @@ export function localDayKeyFromIso(iso: string): string {
 }
 
 function emptySourceMap(): Record<SourceId, { tokens: number; costUSD: number; sessions: number }> {
-  return {
-    "claude-code": { tokens: 0, costUSD: 0, sessions: 0 },
-    codex: { tokens: 0, costUSD: 0, sessions: 0 },
-    hermes: { tokens: 0, costUSD: 0, sessions: 0 },
-  };
+  return Object.fromEntries(
+    SOURCES.map((source) => [source.id, { tokens: 0, costUSD: 0, sessions: 0 }])
+  ) as Record<SourceId, { tokens: number; costUSD: number; sessions: number }>;
+}
+
+function emptySessionMap(): Record<SourceId, Set<string>> {
+  return Object.fromEntries(
+    SOURCES.map((source) => [source.id, new Set<string>()])
+  ) as Record<SourceId, Set<string>>;
 }
 
 function emptyDaily(date: string): DailyBucket {
@@ -38,11 +41,9 @@ function emptyDaily(date: string): DailyBucket {
     cacheCreateTokens: 0,
     cacheReadTokens: 0,
     costUSD: 0,
-    bySource: {
-      "claude-code": { tokens: 0, costUSD: 0 },
-      codex: { tokens: 0, costUSD: 0 },
-      hermes: { tokens: 0, costUSD: 0 },
-    },
+    bySource: Object.fromEntries(
+      SOURCES.map((source) => [source.id, { tokens: 0, costUSD: 0 }])
+    ) as DailyBucket["bySource"],
   };
 }
 
@@ -50,40 +51,35 @@ function eventTokens(e: UsageEvent): number {
   return e.inputTokens + e.outputTokens + e.cacheCreateTokens + e.cacheReadTokens;
 }
 
-export async function buildSnapshot(daysBack = 30): Promise<UsageSnapshot> {
+export async function buildSnapshot(
+  daysBack = 30,
+  sourceIds?: SourceId[]
+): Promise<UsageSnapshot> {
   const today = new Date();
   const todayStr = localDayKey(today);
   const sinceDate = localDayKey(addLocalDays(today, -daysBack));
   const sourceSinceDate = localDayKey(addLocalDays(today, -daysBack - 1));
 
+  const selectedSourceIds = sourceIds ?? await readSelectedSourceIds();
+  const selectedSet = new Set<SourceId>(selectedSourceIds);
+  const selectedSources = SOURCE_REGISTRY.filter((source) => selectedSet.has(source.id));
   const warnings: string[] = [];
-  const [claudeRes, codexRes, hermesRes] = await Promise.allSettled([
-    readClaudeUsage(sourceSinceDate),
-    readCodexUsage(sourceSinceDate),
-    readHermesUsage(sourceSinceDate),
-  ]);
-
+  const results = await Promise.allSettled(
+    selectedSources.map((source) => source.read(sourceSinceDate))
+  );
   const events: UsageEvent[] = [];
-  if (claudeRes.status === "fulfilled") events.push(...claudeRes.value);
-  else warnings.push(`Claude source failed: ${String(claudeRes.reason)}`);
-
-  let codexRateLimit: UsageSnapshot["rateLimit"] = null;
-  if (codexRes.status === "fulfilled") {
-    events.push(...codexRes.value.events);
-    if (codexRes.value.latestRateLimit) {
-      codexRateLimit = {
-        source: "codex",
-        primaryUsedPercent: codexRes.value.latestRateLimit.primaryUsedPercent,
-        primaryResetsAt: codexRes.value.latestRateLimit.primaryResetsAt,
-        secondaryUsedPercent: codexRes.value.latestRateLimit.secondaryUsedPercent,
-        secondaryResetsAt: codexRes.value.latestRateLimit.secondaryResetsAt,
-        planType: codexRes.value.latestRateLimit.planType,
-      };
+  const rateLimits: UsageSnapshot["rateLimits"] = [];
+  results.forEach((result, index) => {
+    const source = selectedSources[index];
+    if (result.status === "fulfilled") {
+      events.push(...result.value.events);
+      for (const limit of result.value.rateLimits ?? []) {
+        rateLimits.push({ source: source.id, ...limit });
+      }
+    } else {
+      warnings.push(`${source.label} source failed: ${String(result.reason)}`);
     }
-  } else warnings.push(`Codex source failed: ${String(codexRes.reason)}`);
-
-  if (hermesRes.status === "fulfilled") events.push(...hermesRes.value);
-  else warnings.push(`Hermes source failed: ${String(hermesRes.reason)}`);
+  });
 
   const dailyMap = new Map<string, DailyBucket>();
   for (let i = 0; i <= daysBack; i++) {
@@ -97,16 +93,8 @@ export async function buildSnapshot(daysBack = 30): Promise<UsageSnapshot> {
   const todayBySource = emptySourceMap();
   const todaySessions = new Set<string>();
   const allSessions = new Set<string>();
-  const sessionsPerSource: Record<SourceId, Set<string>> = {
-    "claude-code": new Set(),
-    codex: new Set(),
-    hermes: new Set(),
-  };
-  const todaySessionsPerSource: Record<SourceId, Set<string>> = {
-    "claude-code": new Set(),
-    codex: new Set(),
-    hermes: new Set(),
-  };
+  const sessionsPerSource = emptySessionMap();
+  const todaySessionsPerSource = emptySessionMap();
   const modelSessions = new Map<string, Set<string>>();
 
   let todayInput = 0, todayOutput = 0, todayCacheCreate = 0, todayCacheRead = 0, todayCost = 0;
@@ -181,6 +169,9 @@ export async function buildSnapshot(daysBack = 30): Promise<UsageSnapshot> {
 
   return {
     generatedAt: new Date().toISOString(),
+    sources: selectedSources.map(({ id, label, shortLabel, accent, accentEnd }) => ({
+      id, label, shortLabel, accent, accentEnd,
+    })),
     today: {
       date: todayStr,
       totalTokens: todayInput + todayOutput + todayCacheCreate + todayCacheRead,
@@ -190,23 +181,11 @@ export async function buildSnapshot(daysBack = 30): Promise<UsageSnapshot> {
       cacheReadTokens: todayCacheRead,
       costUSD: todayCost,
       sessions: todaySessions.size,
-      bySource: {
-        "claude-code": {
-          tokens: todayBySource["claude-code"].tokens,
-          costUSD: todayBySource["claude-code"].costUSD,
-          sessions: todaySessionsPerSource["claude-code"].size,
-        },
-        codex: {
-          tokens: todayBySource.codex.tokens,
-          costUSD: todayBySource.codex.costUSD,
-          sessions: todaySessionsPerSource.codex.size,
-        },
-        hermes: {
-          tokens: todayBySource.hermes.tokens,
-          costUSD: todayBySource.hermes.costUSD,
-          sessions: todaySessionsPerSource.hermes.size,
-        },
-      },
+      bySource: Object.fromEntries(SOURCES.map((source) => [source.id, {
+        tokens: todayBySource[source.id].tokens,
+        costUSD: todayBySource[source.id].costUSD,
+        sessions: todaySessionsPerSource[source.id].size,
+      }])) as UsageSnapshot["today"]["bySource"],
     },
     totals: {
       tokens: totalTokens,
@@ -217,7 +196,7 @@ export async function buildSnapshot(daysBack = 30): Promise<UsageSnapshot> {
     daily,
     models,
     todayModels,
-    rateLimit: codexRateLimit,
+    rateLimits,
     warnings,
   };
 }

@@ -220,12 +220,15 @@ function cumulativeDelta(current: TokenCounters, previous: TokenCounters): Token
 }
 
 export type CodexRateLimit = {
-  primaryUsedPercent?: number;
-  primaryResetsAt?: string;
-  secondaryUsedPercent?: number;
-  secondaryResetsAt?: string;
+  limitId: string;
+  limitName?: string;
   planType?: string;
   observedAt: string;
+  windows: Array<{
+    usedPercent?: number;
+    windowMinutes?: number;
+    resetsAt?: string;
+  }>;
 };
 
 function observedRateLimit(
@@ -234,24 +237,32 @@ function observedRateLimit(
 ): CodexRateLimit {
   const primary = rateLimits.primary as Record<string, unknown> | undefined;
   const secondary = rateLimits.secondary as Record<string, unknown> | undefined;
+  const windows = [primary, secondary]
+    .filter((window): window is Record<string, unknown> => Boolean(window))
+    .map((window) => ({
+      usedPercent: Number.isFinite(Number(window.used_percent))
+        ? Number(window.used_percent)
+        : undefined,
+      windowMinutes: Number.isFinite(Number(window.window_minutes))
+        ? Number(window.window_minutes)
+        : undefined,
+      resetsAt: window.resets_at
+        ? new Date(Number(window.resets_at) * 1000).toISOString()
+        : undefined,
+    }));
   return {
-    primaryUsedPercent: primary ? Number(primary.used_percent) : undefined,
-    primaryResetsAt: primary?.resets_at
-      ? new Date(Number(primary.resets_at) * 1000).toISOString()
-      : undefined,
-    secondaryUsedPercent: secondary ? Number(secondary.used_percent) : undefined,
-    secondaryResetsAt: secondary?.resets_at
-      ? new Date(Number(secondary.resets_at) * 1000).toISOString()
-      : undefined,
+    limitId: textValue(rateLimits.limit_id) ?? "codex",
+    limitName: textValue(rateLimits.limit_name),
     planType: rateLimits.plan_type as string | undefined,
     observedAt: timestamp,
+    windows,
   };
 }
 
 export async function readCodexUsageFromDirectory(
   root: string,
   sinceDate: string
-): Promise<{ events: UsageEvent[]; latestRateLimit: CodexRateLimit | null }> {
+): Promise<{ events: UsageEvent[]; latestRateLimits: CodexRateLimit[] }> {
   const files = await walkJsonl(root);
   const since = new Date(sinceDate + "T00:00:00.000Z").getTime();
   const fileIndex = new Map(files.map((file) => [sessionIdFromFile(file), file]));
@@ -289,7 +300,7 @@ export async function readCodexUsageFromDirectory(
   }
 
   const events: UsageEvent[] = [];
-  let latest: CodexRateLimit | null = null;
+  const latestByLimit = new Map<string, CodexRateLimit>();
 
   for (const session of sessions) {
     if (!session.included) continue;
@@ -334,16 +345,21 @@ export async function readCodexUsageFromDirectory(
 
       if (row.rateLimits && row.timestamp) {
         const observed = observedRateLimit(row.rateLimits, row.timestamp);
-        if (!latest || observed.observedAt > latest.observedAt) latest = observed;
+        const current = latestByLimit.get(observed.limitId);
+        if (!current || observed.observedAt > current.observedAt) {
+          latestByLimit.set(observed.limitId, observed);
+        }
       }
     }
   }
 
-  return { events, latestRateLimit: latest };
+  const latestRateLimits = [...latestByLimit.values()]
+    .sort((a, b) => b.observedAt.localeCompare(a.observedAt));
+  return { events, latestRateLimits };
 }
 
 export async function readCodexUsage(
   sinceDate: string
-): Promise<{ events: UsageEvent[]; latestRateLimit: CodexRateLimit | null }> {
+): Promise<{ events: UsageEvent[]; latestRateLimits: CodexRateLimit[] }> {
   return readCodexUsageFromDirectory(CODEX_DIR, sinceDate);
 }

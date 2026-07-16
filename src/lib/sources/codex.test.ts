@@ -41,7 +41,11 @@ function meta(
   };
 }
 
-function token(snapshot: Snapshot, second: number): Record<string, unknown> {
+function token(
+  snapshot: Snapshot,
+  second: number,
+  rateLimits?: Record<string, unknown>
+): Record<string, unknown> {
   return {
     timestamp: `2026-07-14T00:00:${String(second).padStart(2, "0")}.000Z`,
     type: "event_msg",
@@ -55,6 +59,7 @@ function token(snapshot: Snapshot, second: number): Record<string, unknown> {
           total_tokens: snapshot.input + snapshot.output,
         },
       },
+      rate_limits: rateLimits,
     },
   };
 }
@@ -63,12 +68,17 @@ async function writeSession(
   root: string,
   id: string,
   snapshots: Snapshot[],
-  options: { parentId?: string; threadSource?: string; replayedParentMeta?: boolean } = {}
+  options: {
+    parentId?: string;
+    threadSource?: string;
+    replayedParentMeta?: boolean;
+    rateLimits?: Record<string, unknown>;
+  } = {}
 ): Promise<void> {
   const dir = path.join(root, "2026", "07", "14");
   await mkdir(dir, { recursive: true });
   const rows: Record<string, unknown>[] = [meta(id, options)];
-  snapshots.forEach((snapshot, index) => rows.push(token(snapshot, index + 1)));
+  snapshots.forEach((snapshot, index) => rows.push(token(snapshot, index + 1, options.rateLimits)));
   if (options.replayedParentMeta && options.parentId) {
     rows.push(meta(options.parentId));
   }
@@ -214,5 +224,32 @@ describe("Codex cumulative token accounting", () => {
     const result = await readCodexUsageFromDirectory(root, "2026-07-01");
 
     expect(totals(result.events)).toEqual({ input: 20, cached: 80, output: 10, total: 110 });
+  });
+
+  it("preserves the reported window duration instead of assuming primary means 5 hours", async () => {
+    const root = await createRoot();
+    await writeSession(root, "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee", [
+      { input: 100, output: 10, cached: 80 },
+    ], {
+      rateLimits: {
+        limit_id: "codex",
+        plan_type: "prolite",
+        primary: {
+          used_percent: 27,
+          window_minutes: 10080,
+          resets_at: 1784683733,
+        },
+        secondary: null,
+      },
+    });
+
+    const result = await readCodexUsageFromDirectory(root, "2026-07-01");
+
+    expect(result.latestRateLimits).toHaveLength(1);
+    expect(result.latestRateLimits[0]).toMatchObject({
+      limitId: "codex",
+      planType: "prolite",
+      windows: [{ usedPercent: 27, windowMinutes: 10080 }],
+    });
   });
 });
