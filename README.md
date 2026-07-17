@@ -15,7 +15,7 @@
 | 工具 | 路径 | 解析逻辑 |
 |---|---|---|
 | Claude Code | `~/.claude/projects/**/*.jsonl` | `type=assistant` 行的 `message.usage`，按 `message.id` 去重 |
-| Codex CLI | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `event_msg.payload=token_count`，对累计值取差量；顺带读 `rate_limits` 做 5h / 周窗进度 |
+| Codex CLI | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `event_msg.payload=token_count`，对累计值取差量；session 内 `rate_limits` 仅作为额度降级快照 |
 | Hermes | `~/.hermes/state.db`（Windows 兼容 `%LOCALAPPDATA%/Hermes/state.db`） | 会话累计 token 首次建立基线，后续通过持久化快照按本地日期记录增量 |
 
 价格表硬编码在 `src/lib/pricing.ts`，匹配不到时按模型名 fallback（含 `opus/sonnet/haiku/gpt-5/codex`）。
@@ -79,7 +79,7 @@ echo $! > .server.pid
 
 ### 球 ↔ 3002 服务的关系
 
-悬浮球不是把看板塞进 webview，而是本机先跑一个真实的 Next.js 服务（3002 端口），球只是它的客户端：每 15s 通过 std TcpStream 调用轻量 `/api/widget` 接口，连接失败会短退避重试 3 次。球和浏览器看板共用同一个服务和数据。
+悬浮球不是把看板塞进 webview，而是本机先跑一个真实的 Next.js 服务（3002 端口），球只是它的客户端：每 15s 通过 std TcpStream 调用轻量 `/api/widget` 接口，连接失败会短退避重试 3 次。球和浏览器看板共用同一个服务和数据。展开面板用 `Today / Limits` 分离用量与额度，已选工具逐行显示并支持卡片内滚动。
 
 ### 构建与启动
 
@@ -92,6 +92,8 @@ npm run widget:dev   # 本地调试球（需 3002 服务已起）
 ```
 
 启动顺序：先起 3002 服务（`npm start` 或 `start-hidden.vbs`），再启动悬浮球。球不负责拉起服务；单次刷新失败会保留最后一次数字并显示琥珀色状态点，连续失败 3 次后显示红色离线状态，服务恢复后自动刷新。
+
+Codex 剩余额度优先通过本机 `codex app-server` 实时获取，并按实际 `windowDurationMins` 动态展示窗口：当前没有 5 小时限制就不显示，后续恢复时会自动增加对应窗口。实时读取失败时降级到 session 中最后一次观察值并标记 stale。目前其他工具仍正常统计 token 用量，但在没有可靠额度来源前不会虚构剩余百分比。非标准 Codex 安装可通过 `AI_USAGE_CODEX_BIN` 指向原生可执行文件。
 
 ### 常驻与开机自启
 

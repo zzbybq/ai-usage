@@ -92,13 +92,20 @@ fn get_geometry(window: WebviewWindow) -> Result<Geometry, String> {
 
 #[tauri::command]
 fn set_bounds(window: WebviewWindow, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
-    window
-        .set_size(Size::Logical(LogicalSize::new(w, h)))
-        .map_err(|e| e.to_string())?;
-    window
-        .set_position(Position::Logical(LogicalPosition::new(x, y)))
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    // Keep intermediate sizes off-screen. Without this transaction the webview
+    // can paint the expanded card inside the 116px orb window for one frame.
+    window.hide().map_err(|e| e.to_string())?;
+    let update_result = (|| {
+        window
+            .set_position(Position::Logical(LogicalPosition::new(x, y)))
+            .map_err(|e| e.to_string())?;
+        window
+            .set_size(Size::Logical(LogicalSize::new(w, h)))
+            .map_err(|e| e.to_string())?;
+        Ok::<(), String>(())
+    })();
+    let show_result = window.show().map_err(|e| e.to_string());
+    update_result.and(show_result)
 }
 
 fn open_url(url: &str) {
@@ -119,7 +126,7 @@ fn open_history() {
     open_url("http://localhost:3002");
 }
 
-fn parse_usage_response(bytes: &[u8]) -> Result<serde_json::Value, String> {
+fn parse_widget_response(bytes: &[u8]) -> Result<serde_json::Value, String> {
     let text = String::from_utf8_lossy(bytes);
     let (head, body) = text.split_once("\r\n\r\n").ok_or("no http body")?;
     let status = head.lines().next().unwrap_or_default();
@@ -129,14 +136,11 @@ fn parse_usage_response(bytes: &[u8]) -> Result<serde_json::Value, String> {
 
     let value: serde_json::Value =
         serde_json::from_str(body.trim()).map_err(|e| format!("json: {e}"))?;
-    let today = value
-        .get("today")
-        .cloned()
-        .ok_or("payload: missing today")?;
+    let today = value.get("today").ok_or("payload: missing today")?;
     if today.is_null() {
         return Err("payload: today is null".to_string());
     }
-    Ok(today)
+    Ok(value)
 }
 
 /// Pull today's usage from the local Next.js server (started separately, e.g. PM2).
@@ -187,24 +191,24 @@ fn fetch_usage() -> Result<serde_json::Value, String> {
         .read_to_end(&mut buf)
         .map_err(|e| format!("read: {e}"))?;
 
-    parse_usage_response(&buf)
+    parse_widget_response(&buf)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_usage_response;
+    use super::parse_widget_response;
 
     #[test]
     fn parses_today_from_a_successful_widget_response() {
         let response = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"today\":{\"totalTokens\":42}}";
-        let today = parse_usage_response(response).expect("valid widget response");
-        assert_eq!(today["totalTokens"], 42);
+        let payload = parse_widget_response(response).expect("valid widget response");
+        assert_eq!(payload["today"]["totalTokens"], 42);
     }
 
     #[test]
     fn preserves_http_status_in_diagnostic_errors() {
         let response = b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\n\r\n{\"error\":\"restarting\"}";
-        let error = parse_usage_response(response).expect_err("503 must be rejected");
+        let error = parse_widget_response(response).expect_err("503 must be rejected");
         assert_eq!(error, "http: HTTP/1.1 503 Service Unavailable");
     }
 }
@@ -224,8 +228,8 @@ pub fn run() {
             let scale = win.scale_factor().unwrap_or(1.0);
             let (ax, ay, aw, ah) = work_area();
             let (lx, ly, lw, lh) = (ax / scale, ay / scale, aw / scale, ah / scale);
-            let pill_w = 116.0;
-            let pill_h = 116.0;
+            let pill_w = 112.0;
+            let pill_h = 112.0;
             let x = lx + lw - pill_w - 24.0;
             let y = ly + lh - pill_h - 24.0;
             let _ = win.set_size(Size::Logical(LogicalSize::new(pill_w, pill_h)));

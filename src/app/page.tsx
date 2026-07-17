@@ -9,6 +9,7 @@ import { TrendChart } from "./_components/TrendChart";
 import { ModelTable } from "./_components/ModelTable";
 import { RateLimit } from "./_components/RateLimit";
 import { SourceSplit } from "./_components/SourceSplit";
+import { DailyGoalPicker } from "./_components/DailyGoalPicker";
 import { fmtTokens, fmtCost } from "@/lib/format";
 import type { UsageSnapshot } from "@/lib/types";
 
@@ -78,7 +79,13 @@ export default function Page() {
         <StatCard
           accent="claude"
           label="Today · Tokens"
-          icon={<Sparkles size={16} />}
+          icon={
+            <DailyGoalPicker
+              goal={data?.dailyGoal}
+              currentTokens={todayTotal}
+              onSaved={() => fetchData(true)}
+            />
+          }
           value={fmtTokens(todayTotal)}
           sub={
             <div className="num">

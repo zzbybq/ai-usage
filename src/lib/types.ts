@@ -56,9 +56,44 @@ export type ModelBreakdown = {
   sessions: number;
 };
 
+export type QuotaFreshness = "current" | "stale" | "unavailable";
+
+export type QuotaWindow = {
+  id: string;
+  label: string;
+  windowMinutes?: number;
+  usedPercent?: number;
+  remainingPercent?: number;
+  resetsAt?: string;
+};
+
+export type SourceQuota = {
+  source: SourceId;
+  status: QuotaFreshness;
+  observedAt?: string;
+  planType?: string;
+  origin: "live" | "session" | "cache";
+  windows: QuotaWindow[];
+  resetCredits?: number;
+  message?: string;
+};
+
+export type QuotaSnapshot = {
+  generatedAt: string;
+  selectedSourceCount: number;
+  supportedSourceIds: SourceId[];
+  sources: SourceQuota[];
+};
+
 export type UsageSnapshot = {
   generatedAt: string;
   sources: SourceMeta[];
+  dailyGoal: {
+    enabled: boolean;
+    targetTokens: number;
+    currentTokens: number;
+    progress: number;
+  };
   today: {
     date: string;
     totalTokens: number;

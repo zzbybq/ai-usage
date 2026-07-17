@@ -1,5 +1,5 @@
 import { SOURCE_REGISTRY } from "./source-registry";
-import { readSelectedSourceIds } from "./source-settings";
+import { readDailyGoalSettings, readSelectedSourceIds } from "./source-settings";
 import { SOURCES, type UsageEvent, type UsageSnapshot, type SourceId, type DailyBucket, type ModelBreakdown } from "./types";
 
 function localDayKey(date: Date): string {
@@ -61,6 +61,7 @@ export async function buildSnapshot(
   const sourceSinceDate = localDayKey(addLocalDays(today, -daysBack - 1));
 
   const selectedSourceIds = sourceIds ?? await readSelectedSourceIds();
+  const dailyGoalSettings = await readDailyGoalSettings();
   const selectedSet = new Set<SourceId>(selectedSourceIds);
   const selectedSources = SOURCE_REGISTRY.filter((source) => selectedSet.has(source.id));
   const warnings: string[] = [];
@@ -166,15 +167,21 @@ export async function buildSnapshot(
   const daily = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));
   const models = [...modelMap.values()].sort((a, b) => b.tokens - a.tokens);
   const todayModels = [...todayModelMap.values()].sort((a, b) => b.tokens - a.tokens);
+  const todayTotalTokens = todayInput + todayOutput + todayCacheCreate + todayCacheRead;
 
   return {
     generatedAt: new Date().toISOString(),
     sources: selectedSources.map(({ id, label, shortLabel, accent, accentEnd }) => ({
       id, label, shortLabel, accent, accentEnd,
     })),
+    dailyGoal: {
+      ...dailyGoalSettings,
+      currentTokens: todayTotalTokens,
+      progress: dailyGoalSettings.enabled ? todayTotalTokens / dailyGoalSettings.targetTokens : 0,
+    },
     today: {
       date: todayStr,
-      totalTokens: todayInput + todayOutput + todayCacheCreate + todayCacheRead,
+      totalTokens: todayTotalTokens,
       inputTokens: todayInput,
       outputTokens: todayOutput,
       cacheCreateTokens: todayCacheCreate,

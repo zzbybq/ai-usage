@@ -30,7 +30,7 @@
     --tab-bot: 8,145,178;
   }
 
-  /* ── Ball (collapsed) — glass orb + canvas water, native drag ── */
+  /* ── Ball (collapsed) — goal-driven liquid glass orb, native drag ── */
 
   /* #pill fills the whole (transparent) window and just centers the orb;
      it is also the drag surface. The window is larger than the orb so the
@@ -51,23 +51,24 @@
 
   .orb {
     position: relative;
-    width: 84px;
-    height: 84px;
+    width: 80px;
+    height: 80px;
     border-radius: 50%;
   }
-  /* soft drop shadow + inner top gloss (from the reference design) */
+  .orb-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    border-radius: 50%;
+  }
+  /* soft drop shadow + inner top gloss */
   .orb-shadow {
     position: absolute; inset: 0;
     border-radius: 50%;
     box-shadow: 0 9px 20px -6px rgba(var(--shadow-rgb),0.50),
                 inset 0 3px 8px rgba(255,255,255,0.55);
-  }
-  /* canvas draws the empty-glass fill + animated sine-wave water */
-  .orb-canvas {
-    position: absolute; inset: 0;
-    width: 100%; height: 100%;
-    border-radius: 50%;
-    display: block;
   }
   /* specular highlight sweep */
   .orb-gloss {
@@ -94,8 +95,7 @@
     letter-spacing: -0.02em;
     white-space: nowrap;
     color: #fff;
-    /* dark teal halo + hairline stroke so white stays legible on both the
-       pale glass and the deep water, at any fill level */
+    /* dark halo + hairline stroke keep the number legible across themes */
     text-shadow: 0 1px 1px rgba(2,44,54,0.60),
                  0 1px 4px rgba(2,44,54,0.55),
                  0 0 3px rgba(2,44,54,0.65);
@@ -125,6 +125,25 @@
     opacity: 1;
     transform: scale(1);
     background: #fb7185;
+  }
+  .quota-indicator {
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 3px solid transparent;
+    opacity: 0;
+    transform: rotate(24deg);
+    transition: opacity 0.25s ease, border-color 0.25s ease;
+    pointer-events: none;
+  }
+  .quota-indicator.attention {
+    opacity: 1;
+    border-top-color: #fbbf24;
+  }
+  .quota-indicator.critical {
+    opacity: 1;
+    border-top-color: #fb7185;
+    border-right-color: rgba(251,113,133,0.35);
   }
   @keyframes sync-pulse {
     0%, 100% { box-shadow: 0 1px 5px rgba(2,44,54,0.4), 0 0 0 0 rgba(251,191,36,0.45); }
@@ -158,6 +177,9 @@
     animation: card-in 0.2s cubic-bezier(0.16,1,0.3,1);
     flex-direction: column;
   }
+  html.window-transitioning #pill,
+  html.window-transitioning #card,
+  html.window-transitioning #edge-tab { opacity: 0 !important; }
   @keyframes card-in {
     from { opacity: 0; transform: scale(0.92) translateY(8px); }
     to   { opacity: 1; transform: scale(1) translateY(0); }
@@ -178,7 +200,68 @@
   .card-body {
     padding: 4px 16px 14px;
     flex: 1;
-    overflow-y: auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.26) transparent;
+  }
+  .card-body::-webkit-scrollbar { width: 5px; }
+  .card-body::-webkit-scrollbar-track { background: transparent; }
+  .card-body::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.24);
+    border-radius: 999px;
+  }
+
+  .view-tabs {
+    flex-shrink: 0;
+    z-index: 3;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3px;
+    padding: 3px;
+    margin-bottom: 13px;
+    border-radius: 10px;
+    background: rgba(10,12,30,0.16);
+    backdrop-filter: blur(18px);
+  }
+  .view-tab {
+    position: relative;
+    border: 0;
+    border-radius: 8px;
+    padding: 7px 10px;
+    background: transparent;
+    color: rgba(255,255,255,0.48);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+  }
+  .view-tab.active {
+    color: #fff;
+    background: rgba(255,255,255,0.15);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 3px 10px rgba(20,18,55,0.12);
+  }
+  .tab-alert {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    opacity: 0;
+  }
+  .tab-alert.attention { opacity: 1; background: #fbbf24; }
+  .tab-alert.critical { opacity: 1; background: #fb7185; }
+  .panel-view { display: none; min-height: 0; }
+  .panel-view.active { display: flex; flex: 1; flex-direction: column; animation: view-in 0.18s ease-out; }
+  #view-limits { overflow-y: auto; padding-right: 2px; }
+  @keyframes view-in {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   .big-number {
@@ -192,10 +275,17 @@
     font-weight: 400;
     color: rgba(255,255,255,0.45);
   }
+  .goal-progress {
+    margin-top: 3px;
+    flex-shrink: 0;
+    font-size: 9px;
+    color: rgba(255,255,255,0.40);
+  }
 
   /* progress bar */
   .source-bar {
     margin-top: 12px;
+    flex-shrink: 0;
     height: 4px;
     background: rgba(255,255,255,0.12);
     border-radius: 2px;
@@ -205,31 +295,176 @@
   .bar-claude { height: 100%; background: #ff9f0a; transition: width 0.7s; }
   .bar-codex  { height: 100%; background: #5eead4; transition: width 0.7s; }
 
-  /* source cards */
-  .source-grid {
-    margin-top: 12px;
+  /* Only the source rows scroll. Summary and dashboard action stay visible. */
+  .source-list {
+    margin-top: 10px;
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 3px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.24) transparent;
+    mask-image: linear-gradient(to bottom, transparent 0, #000 5px, #000 calc(100% - 5px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 5px, #000 calc(100% - 5px), transparent 100%);
+  }
+  .source-list::-webkit-scrollbar { width: 4px; }
+  .source-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.22); border-radius: 999px; }
+  .source-row {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    grid-template-columns: minmax(0,1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.085);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
   }
-  .source-card {
-    padding: 10px;
-    border-radius: 12px;
-    background: rgba(255,255,255,0.1);
-  }
+  .source-identity { min-width: 0; }
   .source-name {
-    font-size: 9px;
-    color: rgba(255,255,255,0.4);
-  }
-  .source-number {
-    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
     font-weight: 600;
-    margin-top: 2px;
+    color: rgba(255,255,255,0.78);
+  }
+  .source-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
+  .source-number {
+    font-size: 14px;
+    font-weight: 650;
+    text-align: right;
   }
   .source-detail {
     font-size: 9px;
     color: rgba(255,255,255,0.35);
+    margin-top: 3px;
+    padding-left: 12px;
+  }
+  .source-zero-summary,
+  .source-empty {
+    flex: 0 0 auto;
+    padding: 7px 9px;
+    font-size: 9px;
+    line-height: 1.4;
+    color: rgba(255,255,255,0.39);
+    text-align: center;
+  }
+  .source-empty {
+    margin: auto 0;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.055);
+  }
+
+  /* quota view */
+  .quota-intro {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .quota-eyebrow {
+    font-size: 9px;
+    font-weight: 650;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.38);
+  }
+  .quota-heading { margin-top: 3px; font-size: 16px; font-weight: 680; }
+  .quota-live {
+    padding: 4px 7px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    font-size: 8px;
+    color: rgba(255,255,255,0.48);
+    white-space: nowrap;
+  }
+  .quota-list { display: flex; flex-direction: column; gap: 8px; }
+  .quota-source {
+    border-radius: 13px;
+    padding: 11px;
+    background: rgba(255,255,255,0.09);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.055);
+  }
+  .quota-source.unavailable { opacity: 0.7; }
+  .quota-source-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .quota-source-name {
+    min-width: 0;
+    flex: 1;
+    font-size: 11px;
+    font-weight: 650;
+  }
+  .quota-origin {
     margin-top: 2px;
+    font-size: 8px;
+    color: rgba(255,255,255,0.34);
+  }
+  .quota-plan {
+    padding: 3px 6px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.08);
+    font-size: 8px;
+    color: rgba(255,255,255,0.52);
+    text-transform: uppercase;
+  }
+  .quota-lowest { font-size: 16px; font-weight: 750; }
+  .quota-lowest.healthy { color: #86efac; }
+  .quota-lowest.attention { color: #fde68a; }
+  .quota-lowest.critical { color: #fecdd3; }
+  .quota-lowest.unknown { color: rgba(255,255,255,0.4); }
+  .quota-window { margin-top: 11px; }
+  .quota-window-head,
+  .quota-window-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .quota-window-head { font-size: 9px; color: rgba(255,255,255,0.54); }
+  .quota-window-value { color: rgba(255,255,255,0.82); font-weight: 650; }
+  .quota-track {
+    height: 5px;
+    margin-top: 6px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(15,16,35,0.24);
+  }
+  .quota-fill { height: 100%; border-radius: inherit; transition: width 0.6s ease; }
+  .quota-fill.healthy { background: linear-gradient(90deg,#34d399,#86efac); }
+  .quota-fill.attention { background: linear-gradient(90deg,#f59e0b,#fde68a); }
+  .quota-fill.critical { background: linear-gradient(90deg,#f43f5e,#fda4af); }
+  .quota-window-foot { margin-top: 5px; font-size: 8px; color: rgba(255,255,255,0.32); }
+  .quota-message {
+    margin-top: 9px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,0.07);
+    font-size: 8px;
+    line-height: 1.4;
+    color: rgba(254,240,138,0.68);
+  }
+  .quota-empty {
+    padding: 28px 14px;
+    border-radius: 13px;
+    text-align: center;
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.46);
+    font-size: 10px;
+    line-height: 1.55;
+  }
+  .quota-capability {
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid rgba(255,255,255,0.07);
+    font-size: 8px;
+    line-height: 1.45;
+    color: rgba(255,255,255,0.31);
   }
 
   /* token breakdown */
@@ -241,6 +476,7 @@
     flex-wrap: wrap;
     gap: 4px 12px;
     font-size: 11px;
+    flex-shrink: 0;
   }
   .breakdown span {
     white-space: nowrap;
@@ -250,29 +486,23 @@
   .tk-cache-c { color: #69f0ae; }
   .tk-cache-r { color: #ffd54f; }
 
-  /* history link */
-  .history-link {
-    display: flex;
+  .dashboard-link {
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-end;
     gap: 5px;
-    margin-top: 12px;
-    padding: 7px 0;
-    border-radius: 8px;
-    background: rgba(255,255,255,0.1);
-    color: rgba(255,255,255,0.7);
-    font-size: 11px;
-    font-weight: 500;
+    flex: 0 0 auto;
+    padding: 4px 0;
+    background: transparent;
+    color: rgba(255,255,255,0.72);
+    font-size: 9px;
+    font-weight: 650;
     cursor: pointer;
     border: none;
-    width: 100%;
     transition: background 0.15s, color 0.15s;
   }
-  .history-link:hover {
-    background: rgba(255,255,255,0.18);
-    color: #fff;
-  }
-  .history-arrow { font-size: 10px; }
+  .dashboard-link:hover { color: #fff; }
+  .dashboard-link:focus-visible { outline: 1px solid rgba(255,255,255,0.64); outline-offset: 3px; border-radius: 4px; }
 
   .card-footer {
     padding: 8px 16px;
@@ -293,19 +523,26 @@
   }
   .sync-label.retrying { color: rgba(254,240,138,0.9); }
   .sync-label.offline { color: rgba(254,205,211,0.92); }
-  .refresh-label { font-size: 9px; color: rgba(255,255,255,0.25); }
+  @media (min-width: 80px) and (max-width: 180px) and (min-height: 80px) and (max-height: 220px) {
+    #card { display: none !important; }
+    #pill { display: flex !important; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+  }
 </style>
 </head>
 <body>
 
-<!-- Ball — glass orb with canvas water, native drag -->
+<!-- Ball — daily-goal water level, native drag -->
 <div id="pill" data-tauri-drag-region>
   <div class="orb">
     <div class="orb-shadow"></div>
-    <canvas id="water-canvas" class="orb-canvas" width="168" height="168"></canvas>
+    <canvas id="water-canvas" class="orb-canvas" width="168" height="168" aria-hidden="true"></canvas>
     <div class="orb-gloss"></div>
     <div class="orb-ring"></div>
     <div class="orb-text"><span id="pill-tokens" class="pill-tokens num">…</span></div>
+    <span id="quota-indicator" class="quota-indicator" aria-hidden="true"></span>
     <span id="sync-indicator" class="sync-indicator" aria-hidden="true"></span>
   </div>
 </div>
@@ -320,43 +557,47 @@
     <span class="header-date" id="card-date">Today</span>
   </div>
   <div class="card-body">
-    <div>
-      <span class="big-number num" id="card-total">—</span>
-      <span class="big-unit">tokens</span>
+    <div class="view-tabs" role="tablist" aria-label="Widget view">
+      <button class="view-tab active" id="tab-today" role="tab" aria-selected="true">Today</button>
+      <button class="view-tab" id="tab-limits" role="tab" aria-selected="false">
+        Limits <span class="tab-alert" id="tab-alert" aria-hidden="true"></span>
+      </button>
     </div>
 
-    <div class="source-bar">
-      <div class="bar-claude" id="bar-claude" style="width:0%"></div>
-      <div class="bar-codex" id="bar-codex" style="width:0%"></div>
-    </div>
-
-    <div class="source-grid">
-      <div class="source-card">
-        <div class="source-name">Claude Code</div>
-        <div class="source-number num" id="claude-tokens">—</div>
-        <div class="source-detail num" id="claude-detail">—</div>
+    <section class="panel-view active" id="view-today" role="tabpanel" aria-labelledby="tab-today">
+      <div>
+        <span class="big-number num" id="card-total">—</span>
+        <span class="big-unit">tokens</span>
       </div>
-      <div class="source-card">
-        <div class="source-name">Codex CLI</div>
-        <div class="source-number num" id="codex-tokens">—</div>
-        <div class="source-detail num" id="codex-detail">—</div>
+      <div class="goal-progress num" id="goal-progress">Daily goal · —</div>
+
+      <div class="source-bar" id="source-bar"></div>
+      <div class="source-list" id="source-list"></div>
+
+      <div class="breakdown">
+        <span class="tk-claude">● Input <span class="num" id="tok-input">—</span></span>
+        <span class="tk-codex">● Output <span class="num" id="tok-output">—</span></span>
+        <span class="tk-cache-c">● Cache Create <span class="num" id="tok-cache-create">—</span></span>
+        <span class="tk-cache-r">● Cache Read <span class="num" id="tok-cache-read">—</span></span>
       </div>
-    </div>
 
-    <div class="breakdown">
-      <span class="tk-claude">● Input <span class="num" id="tok-input">—</span></span>
-      <span class="tk-codex">● Output <span class="num" id="tok-output">—</span></span>
-      <span class="tk-cache-c">● Cache Create <span class="num" id="tok-cache-create">—</span></span>
-      <span class="tk-cache-r">● Cache Read <span class="num" id="tok-cache-read">—</span></span>
-    </div>
+    </section>
 
-    <button class="history-link" id="btn-history">
-      View Full History <span class="history-arrow">→</span>
-    </button>
+    <section class="panel-view" id="view-limits" role="tabpanel" aria-labelledby="tab-limits">
+      <div class="quota-intro">
+        <div>
+          <div class="quota-eyebrow">Selected tools</div>
+          <div class="quota-heading">Remaining usage</div>
+        </div>
+        <span class="quota-live" id="quota-live">Checking…</span>
+      </div>
+      <div class="quota-list" id="quota-list"></div>
+      <div class="quota-capability" id="quota-capability"></div>
+    </section>
   </div>
   <div class="card-footer">
     <span class="sync-label" id="sync-label">Waiting for data</span>
-    <span class="refresh-label">Auto-refresh 15s</span>
+    <button class="dashboard-link" id="btn-history">Open dashboard <span aria-hidden="true">→</span></button>
   </div>
 </div>
 
@@ -364,16 +605,18 @@
 /* ── Pre-paint theme: set CSS vars before first frame to avoid flash ── */
 (function () {
   var THEMES_PRE = {
-    Ocean:  { shadow: "11,100,196", tab: ["42,157,246", "11,100,196"] },
-    Aurora: { shadow: "91,47,214",  tab: ["138,134,255", "91,47,214"] },
-    Sunset: { shadow: "238,77,95",  tab: ["255,157,100", "238,77,95"] },
-    Lagoon: { shadow: "8,145,178",  tab: ["42,214,192", "8,145,178"] }
+    Ocean:  { shadow: "11,100,196", tab: ["42,157,246", "11,100,196"], orb: ["#75d6ff", "#0b64c4"] },
+    Aurora: { shadow: "91,47,214",  tab: ["138,134,255", "91,47,214"], orb: ["#b9b6ff", "#5b2fd6"] },
+    Sunset: { shadow: "238,77,95",  tab: ["255,157,100", "238,77,95"], orb: ["#ffc19d", "#ee4d5f"] },
+    Lagoon: { shadow: "8,145,178",  tab: ["42,214,192", "8,145,178"], orb: ["#71ead8", "#087f9e"] }
   };
   var t = THEMES_PRE[localStorage.getItem("theme")] || THEMES_PRE.Lagoon;
   var rs = document.documentElement.style;
   rs.setProperty("--shadow-rgb", t.shadow);
   rs.setProperty("--tab-top", t.tab[0]);
   rs.setProperty("--tab-bot", t.tab[1]);
+  rs.setProperty("--orb-top", t.orb[0]);
+  rs.setProperty("--orb-bottom", t.orb[1]);
 })();
 </script>
 
@@ -386,6 +629,14 @@ function fmtTokens(n) {
   if (n >= 1e3) return (n / 1e3).toFixed(2) + "K";
   return Math.round(n).toString();
 }
+function fmtGoalTokens(n) {
+  if (n >= 1e9) return Number((n / 1e9).toFixed(2)) + "B";
+  return Number((n / 1e6).toFixed(2)) + "M";
+}
+function fitPillTokenSize(text) {
+  var length = String(text).length;
+  $tokens.style.fontSize = (length >= 8 ? 15 : length === 7 ? 16.5 : 18) + "px";
+}
 
 var $pill    = document.getElementById("pill");
 var $card    = document.getElementById("card");
@@ -393,12 +644,16 @@ var $edgeTab = document.getElementById("edge-tab");
 var $tokens  = document.getElementById("pill-tokens");
 var $syncDot = document.getElementById("sync-indicator");
 var $syncLabel = document.getElementById("sync-label");
+var $quotaIndicator = document.getElementById("quota-indicator");
+var $tabAlert = document.getElementById("tab-alert");
 var LAST_USAGE_KEY = "ai-usage-widget:last-usage";
 var LAST_ERROR_KEY = "ai-usage-widget:last-error";
 var lastGoodToday = null;
+var lastGoodPayload = null;
 var lastSuccessAt = 0;
 var consecutiveFailures = 0;
 var pollInFlight = false;
+var quotaNotice = "";
 
 function errorMessage(error) {
   var text = error == null ? "unknown error" : String(error);
@@ -415,12 +670,16 @@ function validToday(today) {
     !!today.bySource && typeof today.bySource === "object";
 }
 
+function validPayload(payload) {
+  return !!payload && typeof payload === "object" && validToday(payload.today);
+}
+
 function syncState(state, detail) {
   $syncDot.className = "sync-indicator" + (state === "online" ? "" : " " + state);
   $syncLabel.className = "sync-label" + (state === "online" ? "" : " " + state);
   if (state === "online") {
     $syncLabel.textContent = "Updated just now";
-    $pill.title = "Usage is up to date";
+    $pill.title = quotaNotice || "Usage is up to date";
   } else if (state === "retrying") {
     $syncLabel.textContent = lastGoodToday ? "Refreshing · showing last value" : "Refreshing · waiting for data";
     $pill.title = "Temporary refresh issue: " + detail;
@@ -430,11 +689,12 @@ function syncState(state, detail) {
   }
 }
 
-function rememberUsage(today) {
-  lastGoodToday = today;
+function rememberUsage(payload) {
+  lastGoodPayload = payload;
+  lastGoodToday = payload.today;
   lastSuccessAt = Date.now();
   try {
-    localStorage.setItem(LAST_USAGE_KEY, JSON.stringify({ at: lastSuccessAt, today: today }));
+    localStorage.setItem(LAST_USAGE_KEY, JSON.stringify({ at: lastSuccessAt, payload: payload }));
     localStorage.removeItem(LAST_ERROR_KEY);
   } catch (e) {}
 }
@@ -442,10 +702,15 @@ function rememberUsage(today) {
 function restoreUsage() {
   try {
     var cached = JSON.parse(localStorage.getItem(LAST_USAGE_KEY) || "null");
-    if (!cached || !validToday(cached.today)) return false;
-    lastGoodToday = cached.today;
+    if (!cached) return false;
+    var payload = cached.payload;
+    // Compatibility with widget versions that cached only today's bucket.
+    if (!validPayload(payload) && validToday(cached.today)) payload = { today: cached.today, sources: [], quotas: null };
+    if (!validPayload(payload)) return false;
+    lastGoodPayload = payload;
+    lastGoodToday = payload.today;
     lastSuccessAt = Number(cached.at) || 0;
-    updateUI(lastGoodToday);
+    updateUI(payload);
     syncState("retrying", "checking for fresh data");
     return true;
   } catch (e) {
@@ -465,93 +730,370 @@ function rememberError(error) {
   console.error("AI Usage widget refresh failed", detail);
   return detail;
 }
-/* ── Canvas water — ported from the claude.ai/design "Ocean" ball ── */
-var FULL_TOKENS = 200000000;                 // 2亿 tokens = full ball
+
+function setActiveView(name) {
+  var today = name === "today";
+  document.getElementById("tab-today").classList.toggle("active", today);
+  document.getElementById("tab-today").setAttribute("aria-selected", today ? "true" : "false");
+  document.getElementById("tab-limits").classList.toggle("active", !today);
+  document.getElementById("tab-limits").setAttribute("aria-selected", today ? "false" : "true");
+  document.getElementById("view-today").classList.toggle("active", today);
+  document.getElementById("view-limits").classList.toggle("active", !today);
+  document.getElementById("source-list").scrollTop = 0;
+  document.getElementById("view-limits").scrollTop = 0;
+}
+
+document.getElementById("tab-today").addEventListener("click", function () { setActiveView("today"); });
+document.getElementById("tab-limits").addEventListener("click", function () { setActiveView("limits"); });
+/* ── Liquid orb — water height follows the shared daily token goal ── */
 var THEMES = {
-  Ocean:  { top: "#3fb9f6", bot: "#0b64c4", empty: ["rgba(224,243,255,0.95)", "rgba(198,228,252,0.95)"], shadow: "11,100,196", tab: ["42,157,246", "11,100,196"] },
-  Aurora: { top: "#8a86ff", bot: "#5b2fd6", empty: ["rgba(235,232,255,0.95)", "rgba(216,208,252,0.95)"], shadow: "91,47,214",  tab: ["138,134,255", "91,47,214"] },
-  Sunset: { top: "#ff9d64", bot: "#ee4d5f", empty: ["rgba(255,238,228,0.95)", "rgba(255,222,214,0.95)"], shadow: "238,77,95",  tab: ["255,157,100", "238,77,95"] },
-  Lagoon: { top: "#2ad6c0", bot: "#0891b2", empty: ["rgba(223,250,246,0.95)", "rgba(200,240,242,0.95)"], shadow: "8,145,178",  tab: ["42,214,192", "8,145,178"] }
+  Ocean:  { top: "#3fb9f6", bot: "#0b64c4", empty: ["#e0f3ff", "#c6e4fc"], shadow: "11,100,196", tab: ["42,157,246", "11,100,196"] },
+  Aurora: { top: "#8a86ff", bot: "#5b2fd6", empty: ["#ebe8ff", "#d8d0fc"], shadow: "91,47,214",  tab: ["138,134,255", "91,47,214"] },
+  Sunset: { top: "#ff9d64", bot: "#ee4d5f", empty: ["#ffeee4", "#ffded6"], shadow: "238,77,95",  tab: ["255,157,100", "238,77,95"] },
+  Lagoon: { top: "#2ad6c0", bot: "#0891b2", empty: ["#dffaf6", "#c8f0f2"], shadow: "8,145,178",  tab: ["42,214,192", "8,145,178"] }
 };
-function hex2rgb(h){ h = h.replace("#",""); return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)]; }
+function hex2rgb(hex) {
+  var value = hex.replace("#", "");
+  return [parseInt(value.slice(0,2),16), parseInt(value.slice(2,4),16), parseInt(value.slice(4,6),16)];
+}
+function rgba(rgb, alpha) { return "rgba(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + "," + alpha + ")"; }
 
-var wcanvas = document.getElementById("water-canvas");
-var wctx = wcanvas.getContext("2d");
-var WW = wcanvas.width, WH = wcanvas.height, WR = WW / 2;
-function wrgba(c, a){ return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + a + ")"; }
-
-var PAL, W_TOP, W_BOT;
+var waterCanvas = document.getElementById("water-canvas");
+var waterContext = waterCanvas.getContext("2d");
+var WATER_W = waterCanvas.width, WATER_H = waterCanvas.height, WATER_R = WATER_W / 2;
+var palette, waterTop, waterBottom;
 function applyTheme(name) {
   var t = THEMES[name] || THEMES.Lagoon;
-  PAL = t;
-  W_TOP = hex2rgb(t.top); W_BOT = hex2rgb(t.bot);
+  palette = t;
+  waterTop = hex2rgb(t.top);
+  waterBottom = hex2rgb(t.bot);
   var rs = document.documentElement.style;
   rs.setProperty("--shadow-rgb", t.shadow);
   rs.setProperty("--tab-top", t.tab[0]);
   rs.setProperty("--tab-bot", t.tab[1]);
+  rs.setProperty("--orb-top", t.top);
+  rs.setProperty("--orb-bottom", t.bot);
   try { localStorage.setItem("theme", name); } catch (e) {}
 }
 applyTheme(localStorage.getItem("theme") || "Lagoon");
 
-var wt = 0;                 // wave phase
-var waterLevel = 0.04;      // current fill 0..1 (eased)
-var waterTarget = 0.04;     // target fill 0..1
+var waterPhase = 0;
+var waterLevel = 0.06;
+var waterTarget = 0.06;
+var waterEnabled = true;
 var waterTimer = null;
+var waveBoost = 0;
 
-function setWaterLevel(total) {
-  waterTarget = total > 0 ? Math.max(0.03, Math.min(1, total / FULL_TOKENS)) : 0.02;
+function setDailyGoalWater(total, goal) {
+  var target = Number(goal && goal.targetTokens) || 200000000;
+  waterEnabled = !goal || goal.enabled !== false;
+  waterTarget = waterEnabled ? Math.max(0.06, Math.min(1, total / target)) : 0;
 }
 
 function drawWater() {
-  waterLevel += (waterTarget - waterLevel) * 0.08;           // ease toward target
-  var amp = WW * 0.028, k = WW / 5.8;
-  wctx.clearRect(0, 0, WW, WH);
-  wctx.save();
-  wctx.beginPath(); wctx.arc(WR, WR, WR, 0, Math.PI * 2); wctx.clip();
-  // empty-glass background
-  var bg = wctx.createLinearGradient(0, 0, 0, WH);
-  bg.addColorStop(0, PAL.empty[0]); bg.addColorStop(1, PAL.empty[1]);
-  wctx.fillStyle = bg; wctx.fillRect(0, 0, WW, WH);
-  // two sine-wave water layers
-  var baseY = WH * (1 - waterLevel);
-  var wave = function (offset, speed, alpha, ampl) {
-    wctx.beginPath(); wctx.moveTo(0, WH);
-    for (var x = 0; x <= WW; x += 4) wctx.lineTo(x, baseY + Math.sin(x / k + wt * speed + offset) * ampl);
-    wctx.lineTo(WW, WH); wctx.closePath();
-    var g = wctx.createLinearGradient(0, baseY - ampl, 0, WH);
-    g.addColorStop(0, wrgba(W_TOP, alpha)); g.addColorStop(1, wrgba(W_BOT, alpha));
-    wctx.fillStyle = g; wctx.fill();
-  };
-  wave(Math.PI, 0.9, 0.45, amp * 0.8);
-  wave(0, 1.35, 1, amp);
-  wctx.restore();
-  wt += 0.06;                 // ~30fps step, matches the reference speed
+  waterLevel += (waterTarget - waterLevel) * 0.075;
+  waveBoost *= 0.91;
+  waterContext.clearRect(0, 0, WATER_W, WATER_H);
+  waterContext.save();
+  waterContext.beginPath();
+  waterContext.arc(WATER_R, WATER_R, WATER_R, 0, Math.PI * 2);
+  waterContext.clip();
+
+  var background = waterContext.createLinearGradient(0, 0, 0, WATER_H);
+  background.addColorStop(0, palette.empty[0]);
+  background.addColorStop(1, palette.empty[1]);
+  waterContext.fillStyle = background;
+  waterContext.fillRect(0, 0, WATER_W, WATER_H);
+
+  if (waterEnabled) {
+    var baseY = WATER_H * (1 - waterLevel);
+    var amplitude = WATER_W * (0.018 + waveBoost * 0.018);
+    var wavelength = WATER_W / 5.8;
+    function wave(offset, speed, alpha, scale) {
+      waterContext.beginPath();
+      waterContext.moveTo(0, WATER_H);
+      for (var x = 0; x <= WATER_W; x += 4) {
+        waterContext.lineTo(x, baseY + Math.sin(x / wavelength + waterPhase * speed + offset) * amplitude * scale);
+      }
+      waterContext.lineTo(WATER_W, WATER_H);
+      waterContext.closePath();
+      var gradient = waterContext.createLinearGradient(0, baseY - amplitude, 0, WATER_H);
+      gradient.addColorStop(0, rgba(waterTop, alpha));
+      gradient.addColorStop(1, rgba(waterBottom, alpha));
+      waterContext.fillStyle = gradient;
+      waterContext.fill();
+    }
+    wave(Math.PI, 0.72, 0.42, 0.82);
+    wave(0, 1, 1, 1);
+  } else {
+    var ambient = waterContext.createRadialGradient(WATER_W * 0.35, WATER_H * 0.68, 4, WATER_W * 0.48, WATER_H * 0.55, WATER_R);
+    ambient.addColorStop(0, rgba(waterTop, 0.28));
+    ambient.addColorStop(1, rgba(waterBottom, 0.08));
+    waterContext.fillStyle = ambient;
+    waterContext.fillRect(0, 0, WATER_W, WATER_H);
+  }
+  waterContext.restore();
+  waterPhase += 0.025;
 }
-function startWater() { if (!waterTimer) { drawWater(); waterTimer = setInterval(drawWater, 33); } }
-function stopWater()  { if (waterTimer) { clearInterval(waterTimer); waterTimer = null; } }
 
-function updateUI(today) {
-  if (!today) { $tokens.textContent = "…"; return; }
-  var claude = (today.bySource && today.bySource["claude-code"]) || { tokens: 0, sessions: 0 };
-  var codex  = (today.bySource && today.bySource.codex) || { tokens: 0, sessions: 0 };
-  var total  = today.totalTokens || 0;
-  var cPct   = total > 0 ? (claude.tokens / total) * 100 : 0;
-  var xPct   = total > 0 ? (codex.tokens / total) * 100 : 0;
+function startWater() {
+  drawWater();
+  if (!waterTimer && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    waterTimer = setInterval(drawWater, 40);
+  }
+}
+function stopWater() {
+  if (waterTimer) clearInterval(waterTimer);
+  waterTimer = null;
+}
+function pulseOrb() {
+  waveBoost = 1;
+}
 
-  $tokens.textContent = fmtTokens(total);
-  setWaterLevel(total);
-  document.getElementById("card-total").textContent    = fmtTokens(total);
-  document.getElementById("bar-claude").style.width    = cPct + "%";
-  document.getElementById("bar-codex").style.width     = xPct + "%";
-  document.getElementById("claude-tokens").textContent = fmtTokens(claude.tokens);
-  document.getElementById("claude-detail").textContent = claude.sessions + " session" + (claude.sessions === 1 ? "" : "s");
-  document.getElementById("codex-tokens").textContent  = fmtTokens(codex.tokens);
-  document.getElementById("codex-detail").textContent  = codex.sessions + " session" + (codex.sessions === 1 ? "" : "s");
-  document.getElementById("tok-input").textContent        = fmtTokens(today.inputTokens);
-  document.getElementById("tok-output").textContent       = fmtTokens(today.outputTokens);
+function sourceMetaMap(sources) {
+  var map = {};
+  (sources || []).forEach(function (source) { map[source.id] = source; });
+  return map;
+}
+
+function renderSources(sources, today) {
+  var bar = document.getElementById("source-bar");
+  var list = document.getElementById("source-list");
+  bar.replaceChildren();
+  list.replaceChildren();
+  var total = today.totalTokens || 0;
+  var rows = (sources || []).map(function (source) {
+    return { source: source, usage: today.bySource[source.id] || { tokens: 0, sessions: 0 } };
+  });
+  var activeRows = rows.filter(function (row) { return row.usage.tokens > 0 || row.usage.sessions > 0; });
+  activeRows.sort(function (left, right) { return right.usage.tokens - left.usage.tokens; });
+  var zeroCount = rows.length - activeRows.length;
+
+  var barRows = activeRows.slice(0, 3);
+  var otherTokens = activeRows.slice(3).reduce(function (sum, row) { return sum + row.usage.tokens; }, 0);
+  if (otherTokens > 0) {
+    barRows.push({ source: { label: "Other", accent: "rgba(255,255,255,0.38)" }, usage: { tokens: otherTokens } });
+  }
+  barRows.forEach(function (row) {
+    var percent = total > 0 ? row.usage.tokens / total * 100 : 0;
+    var segment = document.createElement("div");
+    segment.style.width = percent + "%";
+    segment.style.height = "100%";
+    segment.style.background = row.source.accent || "rgba(255,255,255,0.35)";
+    segment.style.transition = "width 0.7s";
+    segment.title = row.source.label + " · " + Math.round(percent) + "%";
+    bar.appendChild(segment);
+  });
+
+  activeRows.forEach(function (item) {
+    var source = item.source;
+    var usage = item.usage;
+    var row = document.createElement("div");
+    row.className = "source-row";
+    var identity = document.createElement("div");
+    identity.className = "source-identity";
+    var name = document.createElement("div");
+    name.className = "source-name";
+    var dot = document.createElement("span");
+    dot.className = "source-dot";
+    dot.style.background = source.accent || "rgba(255,255,255,0.45)";
+    var label = document.createElement("span");
+    label.textContent = source.label;
+    name.append(dot, label);
+    var detail = document.createElement("div");
+    detail.className = "source-detail num";
+    detail.textContent = usage.sessions + " session" + (usage.sessions === 1 ? "" : "s");
+    identity.append(name, detail);
+    var number = document.createElement("div");
+    number.className = "source-number num";
+    number.textContent = fmtTokens(usage.tokens);
+    row.append(identity, number);
+    list.appendChild(row);
+  });
+
+  if (activeRows.length === 0) {
+    var empty = document.createElement("div");
+    empty.className = "source-empty";
+    empty.textContent = rows.length ? "No usage from selected tools today" : "No tools selected";
+    list.appendChild(empty);
+  } else if (zeroCount > 0) {
+    var zeroSummary = document.createElement("div");
+    zeroSummary.className = "source-zero-summary";
+    zeroSummary.textContent = zeroCount + " selected tool" + (zeroCount === 1 ? " has" : "s have") + " no usage today";
+    list.appendChild(zeroSummary);
+  }
+}
+
+function quotaSeverity(remaining, status) {
+  if (status === "unavailable" || !Number.isFinite(remaining)) return "unknown";
+  if (remaining <= 20) return "critical";
+  if (remaining <= 50 || status === "stale") return "attention";
+  return "healthy";
+}
+
+function lowestRemaining(quota) {
+  var values = (quota.windows || []).map(function (window) { return window.remainingPercent; }).filter(Number.isFinite);
+  return values.length ? Math.min.apply(Math, values) : undefined;
+}
+
+function fmtQuotaPercent(value) {
+  return Number.isFinite(value) ? Math.round(value) + "%" : "—";
+}
+
+function fmtReset(iso) {
+  if (!iso) return "Reset time unavailable";
+  var ms = new Date(iso).getTime() - Date.now();
+  if (!Number.isFinite(ms)) return "Reset time unavailable";
+  if (ms <= 0) return "Reset due";
+  var minutes = Math.ceil(ms / 60000);
+  if (minutes < 60) return "Resets in " + minutes + "m";
+  var hours = Math.floor(minutes / 60);
+  var restMinutes = minutes % 60;
+  if (hours < 24) return "Resets in " + hours + "h" + (restMinutes ? " " + restMinutes + "m" : "");
+  var days = Math.floor(hours / 24);
+  var restHours = hours % 24;
+  return "Resets in " + days + "d" + (restHours ? " " + restHours + "h" : "");
+}
+
+function renderQuotaWindow(window) {
+  var remaining = window.remainingPercent;
+  var severity = quotaSeverity(remaining, "current");
+  var root = document.createElement("div");
+  root.className = "quota-window";
+  var head = document.createElement("div");
+  head.className = "quota-window-head";
+  var label = document.createElement("span");
+  label.textContent = window.label || "Usage window";
+  var value = document.createElement("span");
+  value.className = "quota-window-value num";
+  value.textContent = fmtQuotaPercent(remaining) + " remaining";
+  head.append(label, value);
+  var track = document.createElement("div");
+  track.className = "quota-track";
+  var fill = document.createElement("div");
+  fill.className = "quota-fill " + severity;
+  fill.style.width = (Number.isFinite(remaining) ? Math.max(0, Math.min(100, remaining)) : 0) + "%";
+  track.appendChild(fill);
+  var foot = document.createElement("div");
+  foot.className = "quota-window-foot";
+  var reset = document.createElement("span");
+  reset.textContent = fmtReset(window.resetsAt);
+  foot.appendChild(reset);
+  root.append(head, track, foot);
+  return root;
+}
+
+function renderQuotas(quotas, sources) {
+  var list = document.getElementById("quota-list");
+  var capability = document.getElementById("quota-capability");
+  var live = document.getElementById("quota-live");
+  list.replaceChildren();
+  var meta = sourceMetaMap(sources);
+  var rows = quotas && Array.isArray(quotas.sources) ? quotas.sources.slice() : [];
+  rows.sort(function (left, right) {
+    var a = lowestRemaining(left), b = lowestRemaining(right);
+    if (!Number.isFinite(a)) return 1;
+    if (!Number.isFinite(b)) return -1;
+    return a - b;
+  });
+
+  var overall = "healthy";
+  rows.forEach(function (quota) {
+    var remaining = lowestRemaining(quota);
+    var severity = quotaSeverity(remaining, quota.status);
+    if (severity === "critical") overall = "critical";
+    else if (severity === "attention" && overall !== "critical") overall = "attention";
+
+    var root = document.createElement("div");
+    root.className = "quota-source " + quota.status;
+    var head = document.createElement("div");
+    head.className = "quota-source-head";
+    var dot = document.createElement("span");
+    dot.className = "source-dot";
+    dot.style.background = meta[quota.source]?.accent || "rgba(255,255,255,0.45)";
+    var identity = document.createElement("div");
+    identity.className = "quota-source-name";
+    var title = document.createElement("div");
+    title.textContent = meta[quota.source]?.label || quota.source;
+    var origin = document.createElement("div");
+    origin.className = "quota-origin";
+    origin.textContent = quota.status === "current"
+      ? "Live quota"
+      : quota.status === "stale" ? "Last known quota · may be stale" : "Quota unavailable";
+    identity.append(title, origin);
+    head.append(dot, identity);
+    if (quota.planType) {
+      var plan = document.createElement("span");
+      plan.className = "quota-plan";
+      plan.textContent = quota.planType;
+      head.appendChild(plan);
+    }
+    var lowest = document.createElement("span");
+    lowest.className = "quota-lowest num " + severity;
+    lowest.textContent = fmtQuotaPercent(remaining);
+    lowest.title = "Lowest remaining window";
+    head.appendChild(lowest);
+    root.appendChild(head);
+
+    (quota.windows || []).forEach(function (window) { root.appendChild(renderQuotaWindow(window)); });
+    if (Number.isFinite(quota.resetCredits) && quota.resetCredits > 0) {
+      var credits = document.createElement("div");
+      credits.className = "quota-message";
+      credits.textContent = quota.resetCredits + " reset credit" + (quota.resetCredits === 1 ? "" : "s") + " available";
+      root.appendChild(credits);
+    } else if (quota.status !== "current") {
+      var message = document.createElement("div");
+      message.className = "quota-message";
+      message.textContent = quota.status === "stale"
+        ? "Live refresh failed. Showing the last trustworthy value."
+        : "No reliable quota signal is available yet.";
+      root.appendChild(message);
+    }
+    list.appendChild(root);
+  });
+
+  if (rows.length === 0) {
+    var empty = document.createElement("div");
+    empty.className = "quota-empty";
+    empty.textContent = "None of the selected tools currently exposes a reliable quota signal. Usage tracking continues normally.";
+    list.appendChild(empty);
+    overall = "healthy";
+  }
+
+  var selected = quotas?.selectedSourceCount ?? (sources || []).length;
+  var supported = quotas?.supportedSourceIds?.length ?? rows.length;
+  var usageOnly = Math.max(0, selected - supported);
+  capability.textContent = supported + " of " + selected + " selected tool" + (selected === 1 ? "" : "s") +
+    " provide reliable quota data" + (usageOnly ? " · " + usageOnly + " usage-only" : "") + ".";
+  live.textContent = rows.some(function (quota) { return quota.status === "stale"; }) ? "STALE" : rows.length ? "LIVE" : "NO SIGNAL";
+  $quotaIndicator.className = "quota-indicator" + (overall === "healthy" ? "" : " " + overall);
+  $tabAlert.className = "tab-alert" + (overall === "healthy" ? "" : " " + overall);
+  $pill.dataset.quotaState = overall;
+  quotaNotice = overall === "critical"
+    ? "A selected tool has 20% quota or less remaining"
+    : overall === "attention" ? "Quota needs attention; open Limits for details" : "";
+}
+
+function updateUI(payload) {
+  if (!validPayload(payload)) { $tokens.textContent = "…"; return; }
+  var today = payload.today;
+  var total = today.totalTokens || 0;
+  var goal = payload.dailyGoal || { enabled: true, targetTokens: 200000000 };
+  var pillText = fmtTokens(total);
+  $tokens.textContent = pillText;
+  fitPillTokenSize(pillText);
+  setDailyGoalWater(total, goal);
+  document.getElementById("card-total").textContent = fmtTokens(total);
+  document.getElementById("goal-progress").textContent = goal.enabled === false
+    ? "Daily goal · Off"
+    : "Daily goal · " + fmtTokens(total) + " / " + fmtGoalTokens(goal.targetTokens) + " · " + Math.round(total / goal.targetTokens * 100) + "%";
+  renderSources(payload.sources || [], today);
+  renderQuotas(payload.quotas || null, payload.sources || []);
+  document.getElementById("tok-input").textContent = fmtTokens(today.inputTokens);
+  document.getElementById("tok-output").textContent = fmtTokens(today.outputTokens);
   document.getElementById("tok-cache-create").textContent = fmtTokens(today.cacheCreateTokens);
-  document.getElementById("tok-cache-read").textContent   = fmtTokens(today.cacheReadTokens);
-  document.getElementById("card-date").textContent        = today.date || "Today";
+  document.getElementById("tok-cache-read").textContent = fmtTokens(today.cacheReadTokens);
+  document.getElementById("card-date").textContent = today.date || "Today";
 }
 
 function showPill() {
@@ -580,35 +1122,76 @@ var invoke = window.__TAURI__.core.invoke;
 window.__TAURI__.event.listen("theme", function (e) { applyTheme(e.payload); });
 
 /* ── layout constants ───────────────────────────────────── */
-var PILL_W = 116, PILL_H = 116, ORB_D = 84, CARD_W = 280, CARD_H = 380, EDGE_W = 6, EDGE_H = 48;
+var PILL_W = 112, PILL_H = 112, ORB_D = 80, CARD_W = 280, CARD_H = 380, EDGE_W = 6, EDGE_H = 48;
 var EDGE_THRESHOLD = 20;
 
 /* ── hover state machine ────────────────────────────────── */
 var expanded = false, edgeHidden = false, savedPos = null;
 var hoverState = "out", hoverEnterTime = 0, hoverLeaveTime = 0, lastWinPos = null;
+var transitionInFlight = false, transitionVersion = 0;
 
 function setBounds(x, y, w, h) { return invoke("set_bounds", { x: x, y: y, w: w, h: h }); }
 
+function visualMode(name) {
+  if (name === "card") showCard();
+  else if (name === "edge") showEdgeTab();
+  else showPill();
+}
+
+function currentVisualMode() {
+  return expanded ? "card" : edgeHidden ? "edge" : "pill";
+}
+
+async function transitionWindow(name, bounds, commit) {
+  if (transitionInFlight) return false;
+  transitionInFlight = true;
+  var version = ++transitionVersion;
+  var previous = currentVisualMode();
+  document.documentElement.classList.add("window-transitioning");
+  visualMode(name);
+  try {
+    await setBounds(bounds.x, bounds.y, bounds.w, bounds.h);
+    if (version !== transitionVersion) return false;
+    commit();
+    lastWinPos = [bounds.x, bounds.y];
+    await new Promise(function (resolve) { requestAnimationFrame(resolve); });
+    return true;
+  } catch (error) {
+    visualMode(previous);
+    throw error;
+  } finally {
+    if (version === transitionVersion) {
+      document.documentElement.classList.remove("window-transitioning");
+      transitionInFlight = false;
+    }
+  }
+}
+
 async function doExpand(g) {
-  if (expanded) return;
-  expanded = true;
-  if (edgeHidden) await restoreFromEdge(g);
+  if (expanded || transitionInFlight) return;
+  if (edgeHidden) {
+    await restoreFromEdge(g);
+    g = await invoke("get_geometry");
+  }
   var nx = g.wx + PILL_W - CARD_W;
   var ny = g.wy + PILL_H - CARD_H;
   nx = Math.max(g.work_x + 4, Math.min(nx, g.work_x + g.work_w - CARD_W - 4));
   ny = Math.max(g.work_y + 4, Math.min(ny, g.work_y + g.work_h - CARD_H - 4));
-  await setBounds(nx, ny, CARD_W, CARD_H);
-  showCard();
+  await transitionWindow("card", { x: nx, y: ny, w: CARD_W, h: CARD_H }, function () {
+    expanded = true;
+    edgeHidden = false;
+  });
 }
 async function doCollapse(g) {
-  if (!expanded) return;
-  expanded = false;
+  if (!expanded || transitionInFlight) return;
   var nx = g.wx + CARD_W - PILL_W;
   var ny = g.wy + CARD_H - PILL_H;
   nx = Math.max(g.work_x + 4, Math.min(nx, g.work_x + g.work_w - PILL_W - 4));
   ny = Math.max(g.work_y + 4, Math.min(ny, g.work_y + g.work_h - PILL_H - 4));
-  await setBounds(nx, ny, PILL_W, PILL_H);
-  showPill();
+  await transitionWindow("pill", { x: nx, y: ny, w: PILL_W, h: PILL_H }, function () {
+    expanded = false;
+    edgeHidden = false;
+  });
 }
 function isAtEdge(g) {
   var r = g.work_x + g.work_w, bot = g.work_y + g.work_h;
@@ -622,9 +1205,8 @@ function isAtEdge(g) {
   );
 }
 async function applyEdgeHide(g) {
-  if (edgeHidden) return;
-  edgeHidden = true;
-  savedPos = [g.wx, g.wy];
+  if (edgeHidden || transitionInFlight) return;
+  var nextSavedPos = [g.wx, g.wy];
   var r = g.work_x + g.work_w, bot = g.work_y + g.work_h;
   var cx = g.wx + PILL_W / 2, cy = g.wy + PILL_H / 2;
   var dL = cx - g.work_x, dR = r - cx, dT = cy - g.work_y, dB = bot - cy;
@@ -634,29 +1216,34 @@ async function applyEdgeHide(g) {
   else if (m === dR) { nx = r - EDGE_W - 1;        ny = g.wy; }
   else if (m === dT) { nx = g.wx;                  ny = g.work_y - 1; }
   else               { nx = g.wx;                  ny = bot - EDGE_H - 1; }
-  await setBounds(nx, ny, EDGE_W, EDGE_H);
-  showEdgeTab();
+  await transitionWindow("edge", { x: nx, y: ny, w: EDGE_W, h: EDGE_H }, function () {
+    edgeHidden = true;
+    expanded = false;
+    savedPos = nextSavedPos;
+  });
 }
 async function restoreFromEdge(g) {
-  if (!edgeHidden) return;
-  edgeHidden = false;
+  if (!edgeHidden || transitionInFlight) return;
+  var nx = g.wx, ny = g.wy;
   if (savedPos) {
-    var nx = savedPos[0], ny = savedPos[1];
+    nx = savedPos[0]; ny = savedPos[1];
     if (nx <= g.work_x + EDGE_THRESHOLD + 4) nx = g.work_x + EDGE_THRESHOLD + 8;
     if (nx + PILL_W >= g.work_x + g.work_w - EDGE_THRESHOLD - 4) nx = g.work_x + g.work_w - EDGE_THRESHOLD - PILL_W - 8;
     if (ny <= g.work_y + EDGE_THRESHOLD + 4) ny = g.work_y + EDGE_THRESHOLD + 8;
     if (ny + PILL_H >= g.work_y + g.work_h - EDGE_THRESHOLD - 4) ny = g.work_y + g.work_h - EDGE_THRESHOLD - PILL_H - 8;
     nx = Math.max(g.work_x + 4, Math.min(nx, g.work_x + g.work_w - PILL_W - 4));
     ny = Math.max(g.work_y + 4, Math.min(ny, g.work_y + g.work_h - PILL_H - 4));
-    await setBounds(nx, ny, PILL_W, PILL_H);
   }
-  savedPos = null;
-  showPill();
+  await transitionWindow("pill", { x: nx, y: ny, w: PILL_W, h: PILL_H }, function () {
+    edgeHidden = false;
+    expanded = false;
+    savedPos = null;
+  });
 }
 
 var ticking = false;
 async function tick() {
-  if (ticking) return;
+  if (ticking || transitionInFlight) return;
   ticking = true;
   try {
     var g = await invoke("get_geometry");
@@ -706,12 +1293,13 @@ async function poll() {
   if (pollInFlight) return;
   pollInFlight = true;
   try {
-    var today = await invoke("fetch_usage");
-    if (!validToday(today)) throw new Error("payload: invalid today usage");
-    updateUI(today);
-    rememberUsage(today);
+    var payload = await invoke("fetch_usage");
+    if (!validPayload(payload)) throw new Error("payload: invalid widget snapshot");
+    updateUI(payload);
+    rememberUsage(payload);
     consecutiveFailures = 0;
     syncState("online", "");
+    pulseOrb();
   } catch (e) {
     consecutiveFailures += 1;
     var detail = rememberError(e);
