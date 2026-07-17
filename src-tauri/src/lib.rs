@@ -119,33 +119,62 @@ fn open_history() {
     open_url("http://localhost:3002");
 }
 
+fn parse_usage_response(bytes: &[u8]) -> Result<serde_json::Value, String> {
+    let text = String::from_utf8_lossy(bytes);
+    let (head, body) = text.split_once("\r\n\r\n").ok_or("no http body")?;
+    let status = head.lines().next().unwrap_or_default();
+    if !status.contains(" 200 ") {
+        return Err(format!("http: {status}"));
+    }
+
+    let value: serde_json::Value =
+        serde_json::from_str(body.trim()).map_err(|e| format!("json: {e}"))?;
+    let today = value
+        .get("today")
+        .cloned()
+        .ok_or("payload: missing today")?;
+    if today.is_null() {
+        return Err("payload: today is null".to_string());
+    }
+    Ok(today)
+}
+
 /// Pull today's usage from the local Next.js server (started separately, e.g. PM2).
 /// Uses a tiny std-only HTTP/1.0 GET so we pull ZERO extra crates.
-/// Retries once on connect failure (the dashboard may be mid-restart).
+/// Retries short connection failures while the dashboard is restarting, then
+/// returns a categorized error that the webview can persist for diagnostics.
 #[tauri::command]
 fn fetch_usage() -> Result<serde_json::Value, String> {
     use std::io::{Read, Write};
-    use std::net::TcpStream;
+    use std::net::{SocketAddr, TcpStream};
     use std::time::Duration;
 
-    // Try connect, retry once after 400ms if the server isn't up yet.
+    // PM2 normally comes back in under two seconds. Three short attempts cover
+    // that window without allowing overlapping 15-second frontend polls.
+    let address = SocketAddr::from(([127, 0, 0, 1], 3002));
     let mut stream = None;
     let mut last_err = String::new();
-    for attempt in 0..2 {
-        match TcpStream::connect("127.0.0.1:3002") {
-            Ok(s) => { stream = Some(s); break; }
+    for attempt in 0..3 {
+        match TcpStream::connect_timeout(&address, Duration::from_secs(2)) {
+            Ok(s) => {
+                stream = Some(s);
+                break;
+            }
             Err(e) => {
                 last_err = format!("connect: {e}");
-                if attempt == 0 { std::thread::sleep(Duration::from_millis(400)); }
+                if attempt < 2 {
+                    let delay = if attempt == 0 { 400 } else { 1_200 };
+                    std::thread::sleep(Duration::from_millis(delay));
+                }
             }
         }
     }
     let mut stream = stream.ok_or(last_err)?;
-    stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
-    stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+    stream.set_read_timeout(Some(Duration::from_secs(8))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(3))).ok();
 
     // HTTP/1.0 => server sends a plain body and closes (no chunked encoding to parse).
-    let req = "GET /api/usage?days=1 HTTP/1.0\r\n\
+    let req = "GET /api/widget HTTP/1.0\r\n\
                Host: localhost\r\n\
                Accept: application/json\r\n\
                Connection: close\r\n\r\n";
@@ -158,15 +187,26 @@ fn fetch_usage() -> Result<serde_json::Value, String> {
         .read_to_end(&mut buf)
         .map_err(|e| format!("read: {e}"))?;
 
-    let text = String::from_utf8_lossy(&buf);
-    let body = text
-        .split_once("\r\n\r\n")
-        .map(|(_, b)| b)
-        .ok_or("no http body")?;
+    parse_usage_response(&buf)
+}
 
-    let v: serde_json::Value =
-        serde_json::from_str(body.trim()).map_err(|e| format!("json: {e}"))?;
-    Ok(v.get("today").cloned().unwrap_or(serde_json::Value::Null))
+#[cfg(test)]
+mod tests {
+    use super::parse_usage_response;
+
+    #[test]
+    fn parses_today_from_a_successful_widget_response() {
+        let response = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"today\":{\"totalTokens\":42}}";
+        let today = parse_usage_response(response).expect("valid widget response");
+        assert_eq!(today["totalTokens"], 42);
+    }
+
+    #[test]
+    fn preserves_http_status_in_diagnostic_errors() {
+        let response = b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\n\r\n{\"error\":\"restarting\"}";
+        let error = parse_usage_response(response).expect_err("503 must be rejected");
+        assert_eq!(error, "http: HTTP/1.1 503 Service Unavailable");
+    }
 }
 
 pub fn run() {

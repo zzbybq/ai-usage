@@ -102,6 +102,34 @@
     -webkit-text-stroke: 0.45px rgba(2,55,66,0.28);
     paint-order: stroke fill;
   }
+  .sync-indicator {
+    position: absolute;
+    right: 7px;
+    bottom: 8px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    opacity: 0;
+    transform: scale(0.7);
+    border: 1px solid rgba(255,255,255,0.82);
+    box-shadow: 0 1px 5px rgba(2,44,54,0.4);
+    transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease;
+  }
+  .sync-indicator.retrying {
+    opacity: 1;
+    transform: scale(1);
+    background: #fbbf24;
+    animation: sync-pulse 1.4s ease-in-out infinite;
+  }
+  .sync-indicator.offline {
+    opacity: 1;
+    transform: scale(1);
+    background: #fb7185;
+  }
+  @keyframes sync-pulse {
+    0%, 100% { box-shadow: 0 1px 5px rgba(2,44,54,0.4), 0 0 0 0 rgba(251,191,36,0.45); }
+    50% { box-shadow: 0 1px 5px rgba(2,44,54,0.4), 0 0 0 4px rgba(251,191,36,0); }
+  }
 
   /* ── Edge tab — gradient glow line ── */
 
@@ -251,9 +279,20 @@
     border-top: 1px solid rgba(255,255,255,0.06);
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: space-between;
+    gap: 8px;
     flex-shrink: 0;
   }
+  .sync-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9px;
+    color: rgba(255,255,255,0.38);
+  }
+  .sync-label.retrying { color: rgba(254,240,138,0.9); }
+  .sync-label.offline { color: rgba(254,205,211,0.92); }
   .refresh-label { font-size: 9px; color: rgba(255,255,255,0.25); }
 </style>
 </head>
@@ -267,6 +306,7 @@
     <div class="orb-gloss"></div>
     <div class="orb-ring"></div>
     <div class="orb-text"><span id="pill-tokens" class="pill-tokens num">…</span></div>
+    <span id="sync-indicator" class="sync-indicator" aria-hidden="true"></span>
   </div>
 </div>
 
@@ -315,6 +355,7 @@
     </button>
   </div>
   <div class="card-footer">
+    <span class="sync-label" id="sync-label">Waiting for data</span>
     <span class="refresh-label">Auto-refresh 15s</span>
   </div>
 </div>
@@ -350,6 +391,80 @@ var $pill    = document.getElementById("pill");
 var $card    = document.getElementById("card");
 var $edgeTab = document.getElementById("edge-tab");
 var $tokens  = document.getElementById("pill-tokens");
+var $syncDot = document.getElementById("sync-indicator");
+var $syncLabel = document.getElementById("sync-label");
+var LAST_USAGE_KEY = "ai-usage-widget:last-usage";
+var LAST_ERROR_KEY = "ai-usage-widget:last-error";
+var lastGoodToday = null;
+var lastSuccessAt = 0;
+var consecutiveFailures = 0;
+var pollInFlight = false;
+
+function errorMessage(error) {
+  var text = error == null ? "unknown error" : String(error);
+  return text.length > 180 ? text.slice(0, 177) + "…" : text;
+}
+
+function validToday(today) {
+  return !!today && typeof today === "object" &&
+    Number.isFinite(today.totalTokens) &&
+    Number.isFinite(today.inputTokens) &&
+    Number.isFinite(today.outputTokens) &&
+    Number.isFinite(today.cacheCreateTokens) &&
+    Number.isFinite(today.cacheReadTokens) &&
+    !!today.bySource && typeof today.bySource === "object";
+}
+
+function syncState(state, detail) {
+  $syncDot.className = "sync-indicator" + (state === "online" ? "" : " " + state);
+  $syncLabel.className = "sync-label" + (state === "online" ? "" : " " + state);
+  if (state === "online") {
+    $syncLabel.textContent = "Updated just now";
+    $pill.title = "Usage is up to date";
+  } else if (state === "retrying") {
+    $syncLabel.textContent = lastGoodToday ? "Refreshing · showing last value" : "Refreshing · waiting for data";
+    $pill.title = "Temporary refresh issue: " + detail;
+  } else {
+    $syncLabel.textContent = lastGoodToday ? "Offline · showing last value" : "Offline · no data yet";
+    $pill.title = "Usage service unavailable: " + detail;
+  }
+}
+
+function rememberUsage(today) {
+  lastGoodToday = today;
+  lastSuccessAt = Date.now();
+  try {
+    localStorage.setItem(LAST_USAGE_KEY, JSON.stringify({ at: lastSuccessAt, today: today }));
+    localStorage.removeItem(LAST_ERROR_KEY);
+  } catch (e) {}
+}
+
+function restoreUsage() {
+  try {
+    var cached = JSON.parse(localStorage.getItem(LAST_USAGE_KEY) || "null");
+    if (!cached || !validToday(cached.today)) return false;
+    lastGoodToday = cached.today;
+    lastSuccessAt = Number(cached.at) || 0;
+    updateUI(lastGoodToday);
+    syncState("retrying", "checking for fresh data");
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function rememberError(error) {
+  var detail = errorMessage(error);
+  try {
+    localStorage.setItem(LAST_ERROR_KEY, JSON.stringify({
+      at: new Date().toISOString(),
+      count: consecutiveFailures,
+      message: detail
+    }));
+  } catch (e) {}
+  console.error("AI Usage widget refresh failed", detail);
+  return detail;
+}
 /* ── Canvas water — ported from the claude.ai/design "Ocean" ball ── */
 var FULL_TOKENS = 200000000;                 // 2亿 tokens = full ball
 var THEMES = {
@@ -588,10 +703,22 @@ async function tick() {
 }
 
 async function poll() {
+  if (pollInFlight) return;
+  pollInFlight = true;
   try {
     var today = await invoke("fetch_usage");
-    if (today) updateUI(today); else $tokens.textContent = "…";
-  } catch (e) { $tokens.textContent = "!"; }
+    if (!validToday(today)) throw new Error("payload: invalid today usage");
+    updateUI(today);
+    rememberUsage(today);
+    consecutiveFailures = 0;
+    syncState("online", "");
+  } catch (e) {
+    consecutiveFailures += 1;
+    var detail = rememberError(e);
+    syncState(consecutiveFailures >= 3 ? "offline" : "retrying", detail);
+  } finally {
+    pollInFlight = false;
+  }
 }
 
 document.getElementById("btn-history").addEventListener("click", function (e) {
@@ -600,6 +727,7 @@ document.getElementById("btn-history").addEventListener("click", function (e) {
 });
 
 showPill();
+restoreUsage();
 poll();
 setInterval(poll, 15000);
 // 200ms hover polling — halves IPC traffic vs 100ms with no perceptible lag
