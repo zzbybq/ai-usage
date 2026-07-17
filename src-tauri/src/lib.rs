@@ -388,7 +388,10 @@ fn spawn_bundled_service(paths: &ServicePaths) -> Result<Child, String> {
 
     let mut command = Command::new(&paths.node);
     command
-        .arg(&paths.bootstrap)
+        // The server directory is already the child working directory. Keeping
+        // the entry point relative also avoids Windows command-line splitting
+        // when the application is installed below a path containing spaces.
+        .arg("desktop-bootstrap.cjs")
         .current_dir(&paths.server_dir)
         .env("HOSTNAME", "127.0.0.1")
         .env("PORT", "3002")
