@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.ai-usage.widget",
   "build": {
+    "beforeBuildCommand": "npm run desktop:prepare",
     "frontendDist": "../tauri-ui"
   },
   "app": {
@@ -33,11 +34,15 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "resources": {
+      "../desktop-runtime/": "desktop-runtime/"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.ico"
+      "icons/icon.ico",
+      "icons/icon.icns"
     ]
   }
 }

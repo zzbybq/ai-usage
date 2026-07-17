@@ -15,6 +15,8 @@
 
 # next.js
 /.next/
+/.next-desktop/
+/.desktop-cache/
 /out/
 
 # production
@@ -44,4 +46,8 @@ next-env.d.ts
 /src-tauri/target
 /src-tauri/gen
 /src-tauri/check.out
+
+# staged runtime assembled for Tauri bundles
+/desktop-runtime/*
+!/desktop-runtime/.gitkeep
 

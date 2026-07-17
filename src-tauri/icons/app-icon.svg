@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="tile" x1="72" y1="56" x2="438" y2="462" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#17243A"/>
+      <stop offset="1" stop-color="#080D18"/>
+    </linearGradient>
+    <radialGradient id="glass" cx="0" cy="0" r="1" gradientTransform="translate(205 168) rotate(58) scale(248)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F2FFFF"/>
+      <stop offset="0.48" stop-color="#C7F3F1"/>
+      <stop offset="1" stop-color="#66BBC8"/>
+    </radialGradient>
+    <linearGradient id="water" x1="157" y1="263" x2="363" y2="395" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#27D6C7"/>
+      <stop offset="1" stop-color="#0798C5"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="147" y1="129" x2="370" y2="389" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.96"/>
+      <stop offset="0.5" stop-color="#BDF8F4" stop-opacity="0.58"/>
+      <stop offset="1" stop-color="#32D7D0" stop-opacity="0.9"/>
+    </linearGradient>
+    <filter id="orbShadow" x="80" y="82" width="352" height="358" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#00B9C8" flood-opacity="0.24"/>
+    </filter>
+    <clipPath id="orbClip">
+      <circle cx="256" cy="258" r="142"/>
+    </clipPath>
+  </defs>
+
+  <rect x="24" y="24" width="464" height="464" rx="118" fill="url(#tile)"/>
+  <rect x="25.5" y="25.5" width="461" height="461" rx="116.5" fill="none" stroke="#A9FFF6" stroke-opacity="0.16" stroke-width="3"/>
+
+  <g filter="url(#orbShadow)">
+    <circle cx="256" cy="258" r="142" fill="url(#glass)"/>
+    <g clip-path="url(#orbClip)">
+      <path d="M94 285C141 260 188 275 225 285C273 298 319 298 418 267V420H94V285Z" fill="url(#water)"/>
+      <path d="M94 285C141 260 188 275 225 285C273 298 319 298 418 267" fill="none" stroke="#E9FFFC" stroke-opacity="0.92" stroke-width="8" stroke-linecap="round"/>
+      <ellipse cx="208" cy="181" rx="61" ry="32" transform="rotate(-28 208 181)" fill="#FFFFFF" fill-opacity="0.32"/>
+    </g>
+    <circle cx="256" cy="258" r="142" fill="none" stroke="url(#rim)" stroke-width="8"/>
+  </g>
+
+  <path d="M382 94C382 118 394 130 418 130C394 130 382 142 382 166C382 142 370 130 346 130C370 130 382 118 382 94Z" fill="#D7FFF9"/>
+  <circle cx="420" cy="88" r="9" fill="#62E6D6"/>
+</svg>

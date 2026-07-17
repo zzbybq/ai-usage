@@ -6,6 +6,7 @@
     "dev": "next dev -p 3002",
     "build": "next build",
     "start": "next start -p 3002",
+    "desktop:prepare": "node scripts/prepare-desktop-runtime.mjs",
     "lint": "eslint",
     "test": "vitest run",
     "tauri": "tauri",

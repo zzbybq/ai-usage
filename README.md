@@ -75,32 +75,51 @@ echo $! > .server.pid
 
 ## 桌面悬浮球（Tauri）
 
-除了浏览器看板，还能打包成 Windows 桌面悬浮球 **AI Usage.exe**：屏幕角落一个常驻玻璃球（canvas 水波动画反映今日 token 用量），鼠标悬停展开详情卡片，贴边自动隐藏成一条边线，托盘图标可切主题 / 打开完整看板。基于 Tauri 2，代码在 `src-tauri/` 和 `tauri-ui/`。
+除了浏览器看板，本项目还能打包成 Windows 桌面悬浮球 **AI Usage.exe**：屏幕角落一个常驻玻璃球，鼠标悬停展开卡片，托盘图标可开完整看板。它是一层 **Tauri 2 外壳**，代码在 `src-tauri/` 和 `tauri-ui/`：
 
-### 球 ↔ 3002 服务的关系
+| 文件 | 角色 | 说明 |
+|---|---|---|
+| `src-tauri/src/lib.rs` | Rust 主进程 | 建悬浮窗 / 托盘 / 生命周期；4 个 command：`get_geometry`（光标+窗口+工作区几何）、`set_bounds`（改窗口位置尺寸）、`open_history`（开浏览器看板）、`fetch_usage`（std TcpStream 直连 3002 的轻量 `/api/widget` 接口） |
+| `tauri-ui/index.html` | 渲染 UI | 玻璃球 + canvas 正弦水波 / hover 展开卡片 / 贴边隐藏三态，透明置顶无边框窗；4 主题（Ocean/Aurora/Sunset/Lagoon） |
+| `src-tauri/tauri.conf.json` | Tauri 配置 | 112×112 无边框透明置顶窗口；Windows 输出 NSIS，macOS 可输出 app/dmg |
 
-悬浮球不是把看板塞进 webview，而是本机先跑一个真实的 Next.js 服务（3002 端口），球只是它的客户端：每 15s 通过 std TcpStream 调用轻量 `/api/widget` 接口，连接失败会短退避重试 3 次。球和浏览器看板共用同一个服务和数据。展开面板用 `Today / Limits` 分离用量与额度，已选工具逐行显示并支持卡片内滚动。
+### 外壳 ↔ 3002 服务的关系（关键）
+
+悬浮球**不是**把页面塞进 webview 直接渲染，而是在本机跑一个**真实的 Next.js 服务**（3002 端口）。正式安装包会携带固定版本 Node.js 和精简后的 Next standalone，由 Tauri 自动托管：
+
+```
+AI Usage.exe (Tauri 主进程 lib.rs)
+   ├─ 启动 / 监督内置 Node + Next standalone（127.0.0.1:3002）
+   │  fetch_usage command: std TcpStream GET http://127.0.0.1:3002/api/widget
+   │  连接失败时短退避重试 3 次，并保留 connect/read/http/json 错误类别
+   ├─ 悬浮窗 tauri-ui/index.html   —— 每 15s 调 fetch_usage 刷新今日用量与额度状态
+   └─ 托盘「Open Full Dashboard」→ 浏览器打开 http://localhost:3002（同一个服务）
+```
+
+要点：
+
+- **安装版不再需要 PM2、系统 Node 或手动执行 `npm start`**。Tauri 启动时先识别已有 AI Usage 服务；没有服务时启动内置 runtime，异常退出或连续健康检查失败时自动重启。
+- 应用默认注册开机自启，并使用 single-instance 防止重复启动。用户从托盘选择 `Quit` 后，Tauri 会关闭自己托管的 Node 服务；应用退出期间网页和定时调度也不会运行。
+- 源码开发仍可用 `npm run dev` / `npm start` 单独启动 3002；`widget:dev` 会复用这个外部服务，不强制生成桌面 runtime。
+- 悬浮窗和浏览器看板**共用同一个 3002 服务和同一份数据**，只是两个前端而已。
+- 单次刷新失败时继续显示最后一次成功数据并显示琥珀色状态点；连续失败 3 次后才切换为红色离线状态，错误详情会保存在 WebView `localStorage` 中。
+- 展开面板用 `Today / Limits` 分离用量和剩余额度；工具用量按用户选择逐行渲染，列表过长时在卡片内滚动。
+- Codex 额度优先通过本机 `codex app-server` 的 `account/rateLimits/read` 实时获取，并按接口返回的实际 `windowDurationMins` 展示窗口；当前没有 5 小时窗口就不显示，后续恢复时会自动增加。实时读取失败时才降级到 session 中最后一次观察值并标记 stale。
+- 额度采集与 token 用量采集是独立能力；目前只有 Codex 提供可靠额度信号，其他已选工具继续正常统计用量但不会虚构剩余百分比。非标准 Codex 安装可用 `AI_USAGE_CODEX_BIN` 指向原生 `codex` 可执行文件。
 
 ### 构建与启动
 
 ```bash
-npm install          # 首次装依赖（含 @tauri-apps/cli）
-npm run build        # next build → 产出 .next（3002 服务用）
-npm start            # 起 3002 服务（或用 start-hidden.vbs 后台跑）
-npm run widget:build # 打包悬浮球 → src-tauri/target/release/bundle/nsis/AI Usage_0.1.0_x64-setup.exe
-npm run widget:dev   # 本地调试球（需 3002 服务已起）
+npm install          # 首次需装 @tauri-apps/cli（已在 devDependencies 声明）
+npm run build        # 仅构建独立部署使用的 .next
+npm start            # 仅源码/PM2 部署时手动启动 3002
+npm run widget:build # 自动构建 .next-desktop、打包 Node runtime，再生成一体化安装包
+npm run widget:dev   # 本地调试外壳（需 3002 服务已起）
 ```
 
-启动顺序：先起 3002 服务（`npm start` 或 `start-hidden.vbs`），再启动悬浮球。球不负责拉起服务；单次刷新失败会保留最后一次数字并显示琥珀色状态点，连续失败 3 次后显示红色离线状态，服务恢复后自动刷新。
+Windows x64 产物位于 `src-tauri/target/release/bundle/nsis/`。macOS 需要在 Mac 上安装 Node、Rust 和 Xcode Command Line Tools 后执行同一构建命令，按机器架构下载对应 Node runtime，并输出 `.app/.dmg`；对外分发仍需 Apple Developer 签名和公证。
 
-Codex 剩余额度优先通过本机 `codex app-server` 实时获取，并按实际 `windowDurationMins` 动态展示窗口：当前没有 5 小时限制就不显示，后续恢复时会自动增加对应窗口。实时读取失败时降级到 session 中最后一次观察值并标记 stale。目前其他工具仍正常统计 token 用量，但在没有可靠额度来源前不会虚构剩余百分比。非标准 Codex 安装可通过 `AI_USAGE_CODEX_BIN` 指向原生可执行文件。
-
-### 常驻与开机自启
-
-- **3002 服务**：用 PM2 常驻 + 开机自启（见上文「Windows 后台常驻 + 开机自启」），或 `start-hidden.vbs` 配任务计划程序。
-- **悬浮球**：安装版 exe（nsis setup）装完后默认开机自启；调试态用 `npm run widget:dev` 手动跑，关掉即退出。
-
-> ⚠️ 悬浮球是透明 + 置顶 + 无边框窗口，水波动画在球态 ~30fps、展开卡片时停。hover 状态机 200ms 轮询光标几何，已减半 IPC 开销——改壳时别再往高频轮询或常驻 `infinite` 动画里加东西。
+> ⚠️ 性能注意：悬浮窗是**透明 + 置顶 + 无边框**窗口。水波 canvas 动画在球态以 ~30fps 跑、展开卡片时停。hover 状态机以 200ms 轮询光标几何（`get_geometry`），已从早期 100ms 降下来减半 IPC 开销——改壳时别再往高频轮询或常驻 `infinite` 动画里加东西。
 
 ## 功能
 

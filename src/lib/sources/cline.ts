@@ -16,7 +16,8 @@ function defaultRoots(): string[] {
 async function taskMetadata(taskDirectory: string): Promise<Record<string, unknown>> {
   for (const name of ["task_metadata.json", "metadata.json"]) {
     try {
-      return JSON.parse(await fs.readFile(path.join(taskDirectory, name), "utf8")) as Record<string, unknown>;
+      const metadataFile = path.join(/* turbopackIgnore: true */ taskDirectory, name);
+      return JSON.parse(await fs.readFile(metadataFile, "utf8")) as Record<string, unknown>;
     } catch {
       // Try the next metadata filename.
     }
