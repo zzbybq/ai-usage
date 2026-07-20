@@ -15,8 +15,9 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem, Submenu},
     path::BaseDirectory,
-    tray::TrayIconBuilder,
-    Emitter, LogicalPosition, LogicalSize, Manager, Position, RunEvent, Size, WebviewWindow,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, RunEvent, Size, State,
+    WebviewWindow,
 };
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 
@@ -30,8 +31,27 @@ fn service_address() -> SocketAddr {
 #[cfg(windows)]
 use windows_sys::Win32::{
     Foundation::{POINT, RECT},
-    UI::WindowsAndMessaging::{GetCursorPos, SystemParametersInfoW, SPI_GETWORKAREA},
+    UI::{
+        Shell::ShellExecuteW,
+        WindowsAndMessaging::{
+            GetCursorPos, SystemParametersInfoW, SPI_GETWORKAREA, SW_SHOWNORMAL,
+        },
+    },
 };
+
+struct WidgetUiState {
+    visible: AtomicBool,
+    visibility_menu_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+}
+
+impl Default for WidgetUiState {
+    fn default() -> Self {
+        Self {
+            visible: AtomicBool::new(true),
+            visibility_menu_item: Mutex::new(None),
+        }
+    }
+}
 
 /// Snapshot of everything the JS hover state-machine needs, in LOGICAL pixels.
 #[derive(Serialize)]
@@ -113,10 +133,20 @@ fn get_geometry(window: WebviewWindow) -> Result<Geometry, String> {
 }
 
 #[tauri::command]
-fn set_bounds(window: WebviewWindow, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
+fn set_bounds(
+    window: WebviewWindow,
+    widget_ui: State<'_, WidgetUiState>,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<(), String> {
     // Keep intermediate sizes off-screen. Without this transaction the webview
     // can paint the expanded card inside the 116px orb window for one frame.
-    window.hide().map_err(|e| e.to_string())?;
+    let should_show = widget_ui.visible.load(Ordering::SeqCst);
+    if should_show {
+        window.hide().map_err(|e| e.to_string())?;
+    }
     let update_result = (|| {
         window
             .set_position(Position::Logical(LogicalPosition::new(x, y)))
@@ -126,16 +156,43 @@ fn set_bounds(window: WebviewWindow, x: f64, y: f64, w: f64, h: f64) -> Result<(
             .map_err(|e| e.to_string())?;
         Ok::<(), String>(())
     })();
-    let show_result = window.show().map_err(|e| e.to_string());
+    let show_result = if should_show {
+        window.show().map_err(|e| e.to_string())
+    } else {
+        Ok(())
+    };
     update_result.and(show_result)
 }
 
 fn open_url(url: &str) {
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .spawn();
+        use std::{ffi::OsStr, os::windows::ffi::OsStrExt, ptr};
+
+        let verb = OsStr::new("open")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let target = OsStr::new(url)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let result = unsafe {
+            ShellExecuteW(
+                ptr::null_mut(),
+                verb.as_ptr(),
+                target.as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if result as isize <= 32 {
+            eprintln!(
+                "[open-url] ShellExecuteW failed with code {}",
+                result as isize
+            );
+        }
     }
     #[cfg(target_os = "macos")]
     {
@@ -145,6 +202,43 @@ fn open_url(url: &str) {
     {
         let _ = std::process::Command::new("xdg-open").arg(url).spawn();
     }
+}
+
+fn set_widget_visible(app: &AppHandle, visible: bool, focus: bool) {
+    let widget_ui = app.state::<WidgetUiState>();
+    widget_ui.visible.store(visible, Ordering::SeqCst);
+
+    if let Some(window) = app.get_webview_window("main") {
+        if visible {
+            let _ = window.show();
+            if focus {
+                let _ = window.set_focus();
+            }
+        } else {
+            let _ = window.hide();
+        }
+    }
+
+    let menu_item = widget_ui
+        .visibility_menu_item
+        .lock()
+        .ok()
+        .and_then(|item| item.clone());
+    if let Some(item) = menu_item {
+        let _ = item.set_text(if visible {
+            "Hide Widget"
+        } else {
+            "Show Widget"
+        });
+    }
+}
+
+fn toggle_widget_visibility(app: &AppHandle) {
+    let currently_visible = app
+        .get_webview_window("main")
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or_else(|| app.state::<WidgetUiState>().visible.load(Ordering::SeqCst));
+    set_widget_visible(app, !currently_visible, !currently_visible);
 }
 
 #[tauri::command]
@@ -530,13 +624,11 @@ mod tests {
 
 pub fn run() {
     let app = tauri::Builder::default()
+        .manage(WidgetUiState::default())
         // Must be registered first so a second launch focuses the existing widget
         // instead of starting another dashboard server.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            set_widget_visible(app, true, true);
         }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -574,7 +666,8 @@ pub fn run() {
             let _ = win.show();
 
             // Tray + menu.
-            let show_i = MenuItem::with_id(app, "show", "Show Widget", true, None::<&str>)?;
+            let visibility_i =
+                MenuItem::with_id(app, "visibility", "Hide Widget", true, None::<&str>)?;
             let dash_i = MenuItem::with_id(app, "dash", "Open Full Dashboard", true, None::<&str>)?;
             let t_ocean = MenuItem::with_id(app, "theme:Ocean", "Ocean", true, None::<&str>)?;
             let t_aurora = MenuItem::with_id(app, "theme:Aurora", "Aurora", true, None::<&str>)?;
@@ -587,27 +680,38 @@ pub fn run() {
                 &[&t_ocean, &t_aurora, &t_sunset, &t_lagoon],
             )?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &dash_i, &theme_menu, &quit_i])?;
+            let menu = Menu::with_items(app, &[&visibility_i, &dash_i, &theme_menu, &quit_i])?;
+            *app.state::<WidgetUiState>()
+                .visibility_menu_item
+                .lock()
+                .expect("widget visibility menu lock") = Some(visibility_i);
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("AI Usage Widget")
                 .menu(&menu)
+                .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| {
                     let id = event.id.as_ref();
                     if let Some(theme) = id.strip_prefix("theme:") {
                         let _ = app.emit("theme", theme.to_string());
                     } else {
                         match id {
-                            "show" => {
-                                if let Some(w) = app.get_webview_window("main") {
-                                    let _ = w.show();
-                                }
-                            }
+                            "visibility" => toggle_widget_visibility(app),
                             "dash" => open_url("http://localhost:3002"),
                             "quit" => app.exit(0),
                             _ => {}
                         }
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        toggle_widget_visibility(tray.app_handle());
                     }
                 })
                 .build(app)?;

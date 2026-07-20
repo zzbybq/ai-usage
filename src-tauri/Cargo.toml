@@ -1,6 +1,6 @@
 [package]
 name = "ai-usage-widget"
-version = "0.1.1"
+version = "0.1.3"
 description = "AI Usage floating widget (Tauri)"
 edition = "2021"
 rust-version = "1.77.2"
@@ -26,6 +26,7 @@ time = "=0.3.49"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
+  "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
 

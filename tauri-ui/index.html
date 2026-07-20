@@ -126,24 +126,99 @@
     transform: scale(1);
     background: #fb7185;
   }
+  /* One shared outer track: ambient motion by default, status signal when needed. */
   .quota-indicator {
+    --aura-rgb: var(--shadow-rgb);
+    --aura-opacity-low: 0.26;
+    --aura-opacity-high: 0.46;
     position: absolute;
-    inset: -4px;
+    inset: -5px;
     border-radius: 50%;
-    border: 3px solid transparent;
-    opacity: 0;
-    transform: rotate(24deg);
-    transition: opacity 0.25s ease, border-color 0.25s ease;
+    padding: 1.5px;
+    background: conic-gradient(
+      from 18deg,
+      transparent 0deg 220deg,
+      rgba(var(--aura-rgb),0.04) 238deg,
+      rgba(var(--aura-rgb),0.72) 286deg,
+      rgba(var(--aura-rgb),0.16) 326deg,
+      transparent 350deg 360deg
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0.32;
+    filter: drop-shadow(0 0 4px rgba(var(--aura-rgb),0.24));
+    animation: aura-orbit 10s linear infinite, aura-breathe 3.8s ease-in-out infinite;
+    transition: opacity 0.3s ease, filter 0.3s ease;
+    will-change: transform, opacity;
     pointer-events: none;
   }
+  #pill:hover .quota-indicator {
+    --aura-opacity-low: 0.4;
+    --aura-opacity-high: 0.58;
+    opacity: 0.52;
+    filter: drop-shadow(0 0 5px rgba(var(--aura-rgb),0.34));
+    animation-duration: 5.4s, 2.8s;
+  }
   .quota-indicator.attention {
-    opacity: 1;
-    border-top-color: #fbbf24;
+    --aura-rgb: 251,191,36;
+    --aura-opacity-low: 0.55;
+    --aura-opacity-high: 0.82;
+    opacity: 0.78;
+    animation-duration: 8s, 3s;
   }
   .quota-indicator.critical {
-    opacity: 1;
-    border-top-color: #fb7185;
-    border-right-color: rgba(251,113,133,0.35);
+    --aura-rgb: 251,113,133;
+    opacity: 0.94;
+    background: conic-gradient(
+      from 24deg,
+      rgba(var(--aura-rgb),0.95) 0deg 72deg,
+      rgba(var(--aura-rgb),0.12) 86deg 125deg,
+      transparent 142deg 360deg
+    );
+    animation: aura-alert 1.8s ease-in-out infinite;
+  }
+  #pill[data-sync-state="retrying"][data-quota-state="healthy"] .quota-indicator {
+    --aura-rgb: 251,191,36;
+    opacity: 0.74;
+    animation: aura-retry 1.7s ease-in-out infinite;
+  }
+  #pill[data-sync-state="offline"][data-quota-state="healthy"] .quota-indicator {
+    --aura-rgb: 251,113,133;
+    opacity: 0.86;
+    background: conic-gradient(
+      from 24deg,
+      rgba(var(--aura-rgb),0.9) 0deg 64deg,
+      rgba(var(--aura-rgb),0.14) 78deg 118deg,
+      transparent 138deg 360deg
+    );
+    animation: none;
+    transform: rotate(18deg);
+  }
+  .quota-indicator.refresh-kick {
+    animation: aura-refresh 1.45s cubic-bezier(0.22,0.72,0.25,1),
+               aura-breathe 1.45s ease-in-out !important;
+  }
+  @keyframes aura-orbit {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  @keyframes aura-breathe {
+    0%, 100% { opacity: var(--aura-opacity-low); }
+    50% { opacity: var(--aura-opacity-high); }
+  }
+  @keyframes aura-refresh {
+    from { transform: rotate(0deg); filter: drop-shadow(0 0 3px rgba(var(--aura-rgb),0.2)); }
+    55% { filter: drop-shadow(0 0 7px rgba(var(--aura-rgb),0.52)); }
+    to { transform: rotate(360deg); filter: drop-shadow(0 0 4px rgba(var(--aura-rgb),0.24)); }
+  }
+  @keyframes aura-retry {
+    0%, 100% { transform: rotate(18deg); opacity: 0.36; }
+    50% { transform: rotate(30deg); opacity: 0.86; }
+  }
+  @keyframes aura-alert {
+    0%, 100% { transform: rotate(24deg); filter: drop-shadow(0 0 3px rgba(var(--aura-rgb),0.28)); }
+    50% { transform: rotate(30deg); filter: drop-shadow(0 0 7px rgba(var(--aura-rgb),0.52)); }
   }
   @keyframes sync-pulse {
     0%, 100% { box-shadow: 0 1px 5px rgba(2,44,54,0.4), 0 0 0 0 rgba(251,191,36,0.45); }
@@ -535,7 +610,7 @@
 <body>
 
 <!-- Ball — daily-goal water level, native drag -->
-<div id="pill" data-tauri-drag-region>
+<div id="pill" data-sync-state="retrying" data-quota-state="healthy" data-tauri-drag-region>
   <div class="orb">
     <div class="orb-shadow"></div>
     <canvas id="water-canvas" class="orb-canvas" width="168" height="168" aria-hidden="true"></canvas>
@@ -675,6 +750,7 @@ function validPayload(payload) {
 }
 
 function syncState(state, detail) {
+  $pill.dataset.syncState = state;
   $syncDot.className = "sync-indicator" + (state === "online" ? "" : " " + state);
   $syncLabel.className = "sync-label" + (state === "online" ? "" : " " + state);
   if (state === "online") {
@@ -783,6 +859,7 @@ var waterTarget = 0.06;
 var waterEnabled = true;
 var waterTimer = null;
 var waveBoost = 0;
+var auraKickTimer = null;
 
 function setDailyGoalWater(total, goal) {
   var target = Number(goal && goal.targetTokens) || 200000000;
@@ -848,6 +925,17 @@ function stopWater() {
 }
 function pulseOrb() {
   waveBoost = 1;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+      $pill.dataset.syncState !== "online" ||
+      $pill.dataset.quotaState !== "healthy") return;
+  $quotaIndicator.classList.remove("refresh-kick");
+  void $quotaIndicator.offsetWidth;
+  $quotaIndicator.classList.add("refresh-kick");
+  if (auraKickTimer) clearTimeout(auraKickTimer);
+  auraKickTimer = setTimeout(function () {
+    $quotaIndicator.classList.remove("refresh-kick");
+    auraKickTimer = null;
+  }, 1500);
 }
 
 function sourceMetaMap(sources) {
