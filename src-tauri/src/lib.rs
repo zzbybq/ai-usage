@@ -211,6 +211,7 @@ fn set_widget_visible(app: &AppHandle, visible: bool, focus: bool) {
     if let Some(window) = app.get_webview_window("main") {
         if visible {
             let _ = window.show();
+            let _ = app.emit("widget-shown", ());
             if focus {
                 let _ = window.set_focus();
             }

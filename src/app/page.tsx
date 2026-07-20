@@ -11,49 +11,89 @@ import { RateLimit } from "./_components/RateLimit";
 import { SourceSplit } from "./_components/SourceSplit";
 import { DailyGoalPicker } from "./_components/DailyGoalPicker";
 import { fmtTokens, fmtCost } from "@/lib/format";
-import type { UsageSnapshot } from "@/lib/types";
+import type { LiveUsageSnapshot, UsageSnapshot } from "@/lib/types";
 
 export default function Page() {
   const [range, setRange] = useState<7 | 30 | 90>(30);
   const [metric, setMetric] = useState<"tokens" | "cost">("tokens");
   const [data, setData] = useState<UsageSnapshot | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const requestInFlight = useRef(false);
+  const [live, setLive] = useState<LiveUsageSnapshot | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const historyRequestInFlight = useRef(false);
+  const liveRequestInFlight = useRef(false);
 
-  const fetchData = useCallback(async (force = false) => {
-    if (requestInFlight.current) return;
-    requestInFlight.current = true;
-    setLoading(true);
+  const fetchHistory = useCallback(async (force = false) => {
+    if (historyRequestInFlight.current) return;
+    historyRequestInFlight.current = true;
+    setHistoryLoading(true);
     try {
       const refresh = force ? "&refresh=1" : "";
       const res = await fetch(`/api/usage?days=${range}${refresh}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const snap = (await res.json()) as UsageSnapshot;
       setData(snap);
-      setError(null);
+      setHistoryError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setHistoryError(e instanceof Error ? e.message : String(e));
     } finally {
-      requestInFlight.current = false;
-      setLoading(false);
+      historyRequestInFlight.current = false;
+      setHistoryLoading(false);
     }
   }, [range]);
 
+  const fetchLive = useCallback(async (force = false) => {
+    if (liveRequestInFlight.current) return;
+    liveRequestInFlight.current = true;
+    setLiveLoading(true);
+    try {
+      const refresh = force ? "?refresh=1" : "";
+      const res = await fetch(`/api/widget${refresh}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setLive((await res.json()) as LiveUsageSnapshot);
+      setLiveError(null);
+    } catch (e) {
+      setLiveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      liveRequestInFlight.current = false;
+      setLiveLoading(false);
+    }
+  }, []);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([fetchHistory(true), fetchLive(true)]);
+  }, [fetchHistory, fetchLive]);
+
   useEffect(() => {
-    // Initial synchronization with the local usage API.
+    // Historical charts and model summaries are intentionally less frequent.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void fetchData();
-    const id = setInterval(() => void fetchData(), 60_000);
+    void fetchHistory();
+    const id = setInterval(() => void fetchHistory(), 60_000);
     return () => clearInterval(id);
-  }, [fetchData]);
+  }, [fetchHistory]);
+
+  useEffect(() => {
+    // The dashboard Today cards and Tauri orb share this same 15-second snapshot.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchLive();
+    const id = setInterval(() => void fetchLive(), 15_000);
+    return () => clearInterval(id);
+  }, [fetchLive]);
 
   const daily = useMemo(() => data?.daily ?? [], [data]);
   const recent = useMemo(() => daily.slice(-range), [daily, range]);
-  const todayCacheRead = data?.today.cacheReadTokens ?? 0;
-  const todayCacheWrite = data?.today.cacheCreateTokens ?? 0;
-  const todayTotal = data?.today.totalTokens ?? 0;
+  const current = live ?? data;
+  const currentToday = current?.today;
+  const currentSources = current?.sources ?? [];
+  const currentRateLimits = current?.rateLimits ?? [];
+  const todayCacheRead = currentToday?.cacheReadTokens ?? 0;
+  const todayCacheWrite = currentToday?.cacheCreateTokens ?? 0;
+  const todayTotal = currentToday?.totalTokens ?? 0;
   const todayCachePct = todayTotal > 0 ? (todayCacheRead / todayTotal) * 100 : 0;
+  const loading = historyLoading || liveLoading;
+  const error = liveError || historyError;
 
   return (
     <main className="relative mx-auto w-full max-w-[1400px] px-6 lg:px-10 py-8">
@@ -62,11 +102,11 @@ export default function Page() {
         setRange={setRange}
         metric={metric}
         setMetric={setMetric}
-        generatedAt={data?.generatedAt}
+        generatedAt={current?.generatedAt}
         loading={loading}
-        onRefresh={() => void fetchData(true)}
-        sourceCount={data?.sources.length ?? 0}
-        onSourcesChanged={() => fetchData(true)}
+        onRefresh={() => void refreshAll()}
+        sourceCount={currentSources.length}
+        onSourcesChanged={refreshAll}
       />
 
       {error && (
@@ -81,9 +121,9 @@ export default function Page() {
           label="Today · Tokens"
           icon={
             <DailyGoalPicker
-              goal={data?.dailyGoal}
+              goal={current?.dailyGoal}
               currentTokens={todayTotal}
-              onSaved={() => fetchData(true)}
+              onSaved={refreshAll}
             />
           }
           value={fmtTokens(todayTotal)}
@@ -93,13 +133,13 @@ export default function Page() {
                 <div className="pr-2">
                   <span className="block text-[9px] uppercase tracking-[0.12em] text-zinc-600">Input</span>
                   <span className="mt-0.5 block text-[13px] font-medium text-zinc-300">
-                    {fmtTokens(data?.today.inputTokens ?? 0)}
+                    {fmtTokens(currentToday?.inputTokens ?? 0)}
                   </span>
                 </div>
                 <div className="px-2">
                   <span className="block text-[9px] uppercase tracking-[0.12em] text-zinc-600">Output</span>
                   <span className="mt-0.5 block text-[13px] font-medium text-zinc-300">
-                    {fmtTokens(data?.today.outputTokens ?? 0)}
+                    {fmtTokens(currentToday?.outputTokens ?? 0)}
                   </span>
                 </div>
                 <div className="pl-2">
@@ -126,11 +166,11 @@ export default function Page() {
           accent="emerald"
           label="Today · Cost"
           icon={<Coins size={16} />}
-          value={fmtCost(data?.today.costUSD ?? 0)}
+          value={fmtCost(currentToday?.costUSD ?? 0)}
           sub={
             <span className="num">
-              {data?.today.sessions ?? 0} session{(data?.today.sessions ?? 0) === 1 ? "" : "s"} ·
-              Avg ${((data?.today.costUSD ?? 0) / Math.max(1, data?.today.sessions ?? 1)).toFixed(2)}
+              {currentToday?.sessions ?? 0} session{(currentToday?.sessions ?? 0) === 1 ? "" : "s"} ·
+              Avg ${((currentToday?.costUSD ?? 0) / Math.max(1, currentToday?.sessions ?? 1)).toFixed(2)}
             </span>
           }
         />
@@ -152,9 +192,9 @@ export default function Page() {
 
       <section className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
-          {data && <SourceSplit today={data.today} sources={data.sources} />}
+          {currentToday && <SourceSplit today={currentToday} sources={currentSources} />}
         </div>
-        <RateLimit limits={data?.rateLimits ?? []} referenceTime={data?.generatedAt} />
+        <RateLimit limits={currentRateLimits} referenceTime={current?.generatedAt} />
       </section>
 
       <section className="mt-4 card p-5 relative overflow-hidden">
@@ -208,11 +248,11 @@ export default function Page() {
               <Sparkles size={12} className="inline mr-1 -mt-0.5" /> Today · Models
             </div>
             <h2 className="mt-1 text-base font-semibold text-zinc-100 tracking-tight">
-              Token usage by model · {data?.today.date ?? ""}
+              Token usage by model · {currentToday?.date ?? ""}
             </h2>
           </div>
         </div>
-        <ModelTable models={data?.todayModels ?? []} />
+        <ModelTable models={current?.todayModels ?? []} />
       </section>
 
       <footer className="mt-6 text-[11px] text-zinc-600 num">

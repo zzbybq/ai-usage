@@ -105,6 +105,7 @@ AI Usage.exe (Tauri 主进程 lib.rs)
 - 悬浮球外圈使用低动态主题色呼吸光环；正常时缓慢转动，刷新、离线和额度告警会复用同一光环表达状态，并遵循系统的减少动态效果设置。
 - 源码开发仍可用 `npm run dev` / `npm start` 单独启动 3002；`widget:dev` 会复用这个外部服务，不强制生成桌面 runtime。
 - 悬浮窗和浏览器看板**共用同一个 3002 服务和同一份数据**，只是两个前端而已。
+- 悬浮球与网页 Today 区域共用一份实时今日快照，每 15 秒刷新；网页的 7/30/90 天历史图表每 60 秒刷新，避免频繁重扫历史文件。网页点击 `Refresh` 会同时强制刷新两层数据，悬浮球从隐藏恢复时也会立即刷新一次。
 - 单次刷新失败时继续显示最后一次成功数据并显示琥珀色状态点；连续失败 3 次后才切换为红色离线状态，错误详情会保存在 WebView `localStorage` 中。
 - 展开面板用 `Today / Limits` 分离用量和剩余额度；工具用量按用户选择逐行渲染，列表过长时在卡片内滚动。
 - Codex 额度优先通过本机 `codex app-server` 的 `account/rateLimits/read` 实时获取，并按接口返回的实际 `windowDurationMins` 展示窗口；当前没有 5 小时窗口就不显示，后续恢复时会自动增加。实时读取失败时才降级到 session 中最后一次观察值并标记 stale。
@@ -131,7 +132,7 @@ Windows x64 产物位于 `src-tauri/target/release/bundle/nsis/`。macOS 需要�
 - **Codex Rate Limits**：5h 窗口 + 周窗口进度条 + reset 倒计时
 - **日柱状图**：按 Claude / Codex 堆叠，可在 Tokens / Cost 之间切换，可切 7d / 30d / 90d
 - **Top 模型表**：Top 10 模型 + 来源 chip + 占比条
-- **每 15s 自动刷新**
+- **分层自动刷新**：Today 与悬浮球每 15 秒同步，历史图表每 60 秒刷新
 
 ## 扩展新的 AI 工具
 
@@ -156,7 +157,8 @@ tauri-ui/
 src/
 ├─ app/
 │  ├─ api/
-│  │  └─ usage/route.ts       # GET /api/usage?days=N
+│  │  ├─ usage/route.ts       # GET /api/usage?days=N
+│  │  └─ widget/route.ts      # GET /api/widget（网页 Today + 悬浮球实时快照）
 │  ├─ _components/            # KPI 卡 / 图表 / 表格 / Header 等
 │  ├─ globals.css             # 设计令牌 + 卡片样式
 │  ├─ layout.tsx

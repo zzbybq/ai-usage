@@ -6,12 +6,13 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const runtime = "nodejs";
 
-/** Lightweight payload for the 15-second Tauri widget poll. */
-export async function GET() {
+/** Shared live payload for the 15-second Tauri widget and dashboard Today poll. */
+export async function GET(request: Request) {
   try {
+    const force = new URL(request.url).searchParams.get("refresh") === "1";
     // Zero history days still asks sources for the previous local day so
     // cumulative counters can be rebased correctly across midnight.
-    const snapshot = await getUsageSnapshot(0);
+    const snapshot = await getUsageSnapshot(0, force);
     const quotas = await getQuotaSnapshot(
       snapshot.sources.map((source) => source.id),
       snapshot.rateLimits
@@ -22,6 +23,8 @@ export async function GET() {
         sources: snapshot.sources,
         dailyGoal: snapshot.dailyGoal,
         today: snapshot.today,
+        todayModels: snapshot.todayModels,
+        rateLimits: snapshot.rateLimits,
         quotas,
         warnings: snapshot.warnings,
       },

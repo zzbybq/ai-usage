@@ -128,3 +128,10 @@ export type UsageSnapshot = {
   }>;
   warnings: string[];
 };
+
+export type LiveUsageSnapshot = Pick<
+  UsageSnapshot,
+  "generatedAt" | "sources" | "dailyGoal" | "today" | "todayModels" | "rateLimits" | "warnings"
+> & {
+  quotas: QuotaSnapshot;
+};

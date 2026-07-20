@@ -1208,6 +1208,7 @@ var invoke = window.__TAURI__.core.invoke;
 
 // tray "Theme" submenu → live palette switch
 window.__TAURI__.event.listen("theme", function (e) { applyTheme(e.payload); });
+window.__TAURI__.event.listen("widget-shown", function () { void poll(); });
 
 /* ── layout constants ───────────────────────────────────── */
 var PILL_W = 112, PILL_H = 112, ORB_D = 80, CARD_W = 280, CARD_H = 380, EDGE_W = 6, EDGE_H = 48;
