@@ -107,7 +107,9 @@ export async function readClaudeUsage(sinceDate: string): Promise<UsageEvent[]> 
       const tsMs = new Date(ts).getTime();
       if (Number.isNaN(tsMs) || tsMs < since) continue;
 
-      const model = (msg?.model as string) ?? "unknown";
+      const model = typeof msg?.model === "string" && msg.model.trim()
+        ? msg.model.trim()
+        : "claude-unknown";
       if (model === "<synthetic>") continue;
 
       const input = Number(usage.input_tokens ?? 0);

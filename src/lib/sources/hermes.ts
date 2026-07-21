@@ -103,7 +103,7 @@ export async function readHermesUsage(sinceDate: string): Promise<UsageEvent[]> 
     const cacheCreateTokens = positiveInt(row.cache_write_tokens);
     if (inputTokens + outputTokens + cacheReadTokens + cacheCreateTokens === 0) continue;
 
-    const model = String(row.model ?? "unknown").trim() || "unknown";
+    const model = String(row.model ?? "").trim() || "hermes-unknown";
     const actual = typeof row.actual_cost_usd === "number" && row.actual_cost_usd >= 0 ? row.actual_cost_usd : null;
     const estimated = typeof row.estimated_cost_usd === "number" && row.estimated_cost_usd >= 0 ? row.estimated_cost_usd : null;
     const status = row.cost_status == null ? null : String(row.cost_status);

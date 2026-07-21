@@ -86,8 +86,8 @@ export async function readWorkbuddyUsage(sinceDate: string): Promise<UsageEvent[
 
       const modelInfo = trace.modelInfo as Record<string, unknown> | undefined;
       const models = modelInfo?.models as string[] | undefined;
-      const model = models?.[0] ?? "unknown";
-      if (model === "<synthetic>" || model === "unknown") continue;
+      const model = models?.[0]?.trim() || "workbuddy-unknown";
+      if (model === "<synthetic>") continue;
 
       const inputTokens = Number(modelInfo?.totalInputTokens ?? 0);
       const outputTokens = Number(modelInfo?.totalOutputTokens ?? 0);

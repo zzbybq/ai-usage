@@ -51,6 +51,16 @@ function eventTokens(e: UsageEvent): number {
   return e.inputTokens + e.outputTokens + e.cacheCreateTokens + e.cacheReadTokens;
 }
 
+export function isUnknownModel(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  return (
+    !normalized ||
+    normalized === "unknown" ||
+    normalized.endsWith("-unknown") ||
+    normalized.endsWith("_unknown")
+  );
+}
+
 export async function buildSnapshot(
   daysBack = 30,
   sourceIds?: SourceId[]
@@ -74,6 +84,13 @@ export async function buildSnapshot(
     const source = selectedSources[index];
     if (result.status === "fulfilled") {
       events.push(...result.value.events);
+      const unknownEvents = result.value.events.filter((event) => isUnknownModel(event.model));
+      if (unknownEvents.length > 0) {
+        const sessions = new Set(unknownEvents.map((event) => event.sessionId)).size;
+        warnings.push(
+          `${source.label} model metadata missing for ${unknownEvents.length} usage event(s) across ${sessions} session(s)`
+        );
+      }
       for (const limit of result.value.rateLimits ?? []) {
         rateLimits.push({ source: source.id, ...limit });
       }

@@ -24,7 +24,7 @@ async function createRoot(): Promise<string> {
 
 function meta(
   id: string,
-  options: { parentId?: string; threadSource?: string } = {}
+  options: { parentId?: string; threadSource?: string; model?: string | null } = {}
 ): Record<string, unknown> {
   return {
     timestamp: "2026-07-14T00:00:00.000Z",
@@ -33,11 +33,19 @@ function meta(
       id,
       session_id: id,
       cwd: "D:\\synthetic",
-      model: "gpt-5",
+      ...(options.model === null ? {} : { model: options.model ?? "gpt-5" }),
       thread_source: options.threadSource ?? "user",
       parent_thread_id: options.parentId,
       forked_from_id: options.parentId,
     },
+  };
+}
+
+function turnContext(model: string, second: number, key: "model" | "model_id" | "modelId" = "model") {
+  return {
+    timestamp: `2026-07-14T00:00:${String(second).padStart(2, "0")}.000Z`,
+    type: "turn_context",
+    payload: { [key]: model },
   };
 }
 
@@ -73,6 +81,7 @@ async function writeSession(
     threadSource?: string;
     replayedParentMeta?: boolean;
     rateLimits?: Record<string, unknown>;
+    model?: string | null;
   } = {}
 ): Promise<void> {
   const dir = path.join(root, "2026", "07", "14");
@@ -82,6 +91,20 @@ async function writeSession(
   if (options.replayedParentMeta && options.parentId) {
     rows.push(meta(options.parentId));
   }
+  await writeFile(
+    path.join(dir, `rollout-2026-07-14T08-00-00-${id}.jsonl`),
+    rows.map((row) => JSON.stringify(row)).join("\n") + "\n",
+    "utf8"
+  );
+}
+
+async function writeRows(
+  root: string,
+  id: string,
+  rows: Record<string, unknown>[]
+): Promise<void> {
+  const dir = path.join(root, "2026", "07", "14");
+  await mkdir(dir, { recursive: true });
   await writeFile(
     path.join(dir, `rollout-2026-07-14T08-00-00-${id}.jsonl`),
     rows.map((row) => JSON.stringify(row)).join("\n") + "\n",
@@ -106,6 +129,66 @@ function totals(events: Awaited<ReturnType<typeof readCodexUsageFromDirectory>>[
 }
 
 describe("Codex cumulative token accounting", () => {
+  it("uses turn_context when session_meta no longer contains a model", async () => {
+    const root = await createRoot();
+    const id = "01010101-0101-0101-0101-010101010101";
+    await writeRows(root, id, [
+      meta(id, { model: null }),
+      turnContext("gpt-5.6-sol", 1),
+      token({ input: 100, output: 10, cached: 80 }, 2),
+    ]);
+
+    const result = await readCodexUsageFromDirectory(root, "2026-07-01");
+
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0].model).toBe("gpt-5.6-sol");
+  });
+
+  it("attributes cumulative deltas to the model active at each token row", async () => {
+    const root = await createRoot();
+    const id = "02020202-0202-0202-0202-020202020202";
+    await writeRows(root, id, [
+      meta(id, { model: null }),
+      turnContext("gpt-5.6-sol", 1),
+      token({ input: 100, output: 10, cached: 80 }, 2),
+      turnContext("gpt-5.7-sol", 3),
+      token({ input: 160, output: 20, cached: 120 }, 4),
+    ]);
+
+    const result = await readCodexUsageFromDirectory(root, "2026-07-01");
+
+    expect(result.events.map((event) => event.model)).toEqual(["gpt-5.6-sol", "gpt-5.7-sol"]);
+    expect(totals(result.events)).toEqual({ input: 40, cached: 120, output: 20, total: 180 });
+  });
+
+  it("accepts known model key aliases used by future context envelopes", async () => {
+    const root = await createRoot();
+    const id = "03030303-0303-0303-0303-030303030303";
+    await writeRows(root, id, [
+      meta(id, { model: null }),
+      turnContext("gpt-5.7-sol", 1, "model_id"),
+      token({ input: 100, output: 10, cached: 80 }, 2),
+    ]);
+
+    const result = await readCodexUsageFromDirectory(root, "2026-07-01");
+
+    expect(result.events[0].model).toBe("gpt-5.7-sol");
+  });
+
+  it("labels missing model metadata explicitly instead of guessing gpt-5", async () => {
+    const root = await createRoot();
+    const id = "04040404-0404-0404-0404-040404040404";
+    await writeRows(root, id, [
+      meta(id, { model: null }),
+      token({ input: 100, output: 10, cached: 80 }, 1),
+    ]);
+
+    const result = await readCodexUsageFromDirectory(root, "2026-07-01");
+
+    expect(result.events[0].model).toBe("codex-unknown");
+    expect(result.events[0].costUSD).toBe(0);
+  });
+
   it("keeps ordinary cumulative deltas unchanged", async () => {
     const root = await createRoot();
     await writeSession(root, "11111111-1111-1111-1111-111111111111", [

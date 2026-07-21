@@ -8,6 +8,7 @@ import type { UsageEvent } from "../types";
 
 const CODEX_DIR = path.join(os.homedir(), ".codex", "sessions");
 const SESSION_ID_RE = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+const UNKNOWN_MODEL = "codex-unknown";
 
 /** Parse a token field to a non-negative integer (0 for missing/garbage). */
 function toInt(v: unknown): number {
@@ -24,6 +25,7 @@ type TokenCounters = {
 
 type TokenCountRow = {
   timestamp: string;
+  model: string;
   cumulative?: TokenCounters;
   last?: TokenCounters;
   rateLimits?: Record<string, unknown>;
@@ -32,7 +34,6 @@ type TokenCountRow = {
 type ParsedSession = {
   file: string;
   sessionId: string;
-  model: string;
   project?: string;
   threadSource?: string;
   parentThreadId?: string;
@@ -71,6 +72,40 @@ function textValue(value: unknown): string | undefined {
   return text || undefined;
 }
 
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value != null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+/**
+ * Read model metadata from the small set of Codex context shapes seen across
+ * CLI/Desktop releases. Unknown layouts deliberately stay unknown instead of
+ * being guessed as a concrete model.
+ */
+function modelFromContext(
+  row: Record<string, unknown>,
+  payload?: Record<string, unknown>
+): string | undefined {
+  const collaboration = recordValue(payload?.collaboration_mode);
+  const candidates = [
+    payload,
+    row,
+    recordValue(payload?.context),
+    recordValue(payload?.settings),
+    recordValue(payload?.config),
+    recordValue(collaboration?.settings),
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    for (const key of ["model", "model_id", "modelId"]) {
+      const model = textValue(candidate[key]);
+      if (model) return model;
+    }
+  }
+  return undefined;
+}
+
 function tokenCounters(value: Record<string, unknown>): TokenCounters {
   const input = toInt(value.input_tokens);
   const output = toInt(value.output_tokens);
@@ -86,7 +121,7 @@ function tokenCounters(value: Record<string, unknown>): TokenCounters {
 async function parseSession(file: string, included: boolean): Promise<ParsedSession> {
   const fileSessionId = sessionIdFromFile(file);
   let sessionId = fileSessionId;
-  let model = "gpt-5";
+  let currentModel = UNKNOWN_MODEL;
   let project: string | undefined;
   let threadSource: string | undefined;
   let parentThreadId: string | undefined;
@@ -118,12 +153,20 @@ async function parseSession(file: string, included: boolean): Promise<ParsedSess
       ownerMetadataRead = true;
       sessionId = textValue(payload.id) ?? textValue(payload.session_id) ?? fileSessionId;
       project = textValue(payload.cwd);
-      model = textValue(payload.model) ?? model;
+      currentModel = modelFromContext(row, payload) ?? currentModel;
       threadSource = textValue(payload.thread_source)?.toLowerCase();
       parentThreadId = textValue(payload.parent_thread_id);
       forkedFromId = textValue(payload.forked_from_id ?? payload.forked_from);
       continue;
     }
+
+    // Replayed parent session_meta rows must not alter the child's context.
+    if (type === "session_meta") continue;
+
+    // turn_context is the current Codex source of truth. Checking the same
+    // bounded context keys on other row types also tolerates a future rename of
+    // the envelope without recursively guessing from unrelated payload data.
+    currentModel = modelFromContext(row, payload) ?? currentModel;
 
     if (type !== "event_msg" || !payload || payload.type !== "token_count") continue;
 
@@ -132,6 +175,7 @@ async function parseSession(file: string, included: boolean): Promise<ParsedSess
     const lastUsage = info?.last_token_usage as Record<string, unknown> | undefined;
     const tokenRow: TokenCountRow = {
       timestamp: textValue(row.timestamp) ?? "",
+      model: currentModel,
       rateLimits: payload.rate_limits as Record<string, unknown> | undefined,
     };
     if (totalUsage) {
@@ -146,7 +190,6 @@ async function parseSession(file: string, included: boolean): Promise<ParsedSess
   return {
     file,
     sessionId,
-    model,
     project,
     threadSource,
     parentThreadId,
@@ -327,14 +370,14 @@ export async function readCodexUsageFromDirectory(
           events.push({
             source: "codex",
             timestamp: row.timestamp,
-            model: session.model,
+            model: row.model,
             inputTokens: billableInput,
             outputTokens: delta.output,
             cacheCreateTokens: 0,
             cacheReadTokens: delta.cached,
             project: session.project,
             sessionId: session.sessionId,
-            costUSD: costFor(session.model, {
+            costUSD: costFor(row.model, {
               input: billableInput,
               output: delta.output,
               cacheRead: delta.cached,

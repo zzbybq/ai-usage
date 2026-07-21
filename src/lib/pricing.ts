@@ -35,6 +35,9 @@ const FALLBACK: ModelPricing = { input: 3 / M, output: 15 / M, cacheCreate: 3.75
 
 function resolve(model: string): ModelPricing {
   const key = model.toLowerCase();
+  if (!key.trim() || key === "unknown" || key.endsWith("-unknown") || key.endsWith("_unknown")) {
+    return { input: 0, output: 0, cacheCreate: 0, cacheRead: 0 };
+  }
   if (TABLE[key]) return TABLE[key];
   for (const k of Object.keys(TABLE)) {
     if (key.startsWith(k) || key.includes(k)) return TABLE[k];
