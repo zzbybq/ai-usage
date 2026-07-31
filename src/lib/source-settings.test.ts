@@ -9,10 +9,10 @@ describe("source selection normalization", () => {
 
   it("falls back to every supported source for an empty or invalid selection", () => {
     expect(normalizeSelectedSourceIds([])).toEqual([
-      "claude-code", "codex", "workbuddy", "hermes", "gemini-cli", "opencode", "cline",
+      "claude-code", "codex", "workbuddy", "hermes", "gemini-cli", "opencode", "cline", "grok",
     ]);
     expect(normalizeSelectedSourceIds("codex")).toEqual([
-      "claude-code", "codex", "workbuddy", "hermes", "gemini-cli", "opencode", "cline",
+      "claude-code", "codex", "workbuddy", "hermes", "gemini-cli", "opencode", "cline", "grok",
     ]);
   });
 });

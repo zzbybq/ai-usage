@@ -8,6 +8,7 @@ import { readWorkbuddyUsage } from "./sources/workbuddy";
 import { readGeminiUsage } from "./sources/gemini";
 import { readOpenCodeUsage } from "./sources/opencode";
 import { readClineUsage } from "./sources/cline";
+import { readGrokUsage } from "./sources/grok";
 import { SOURCES, type SourceId, type SourceMeta, type UsageEvent } from "./types";
 
 export type SourceReadResult = {
@@ -33,6 +34,7 @@ const READERS: Record<SourceId, SourceDefinition["read"]> = {
   "gemini-cli": async (sinceDate) => ({ events: await readGeminiUsage(sinceDate) }),
   opencode: async (sinceDate) => ({ events: await readOpenCodeUsage(sinceDate) }),
   cline: async (sinceDate) => ({ events: await readClineUsage(sinceDate) }),
+  grok: async (sinceDate) => ({ events: await readGrokUsage(sinceDate) }),
 };
 
 const DETECT_PATHS: Record<SourceId, string[]> = {
@@ -55,6 +57,7 @@ const DETECT_PATHS: Record<SourceId, string[]> = {
     path.join(home, ".cline", "data", "tasks"),
     path.join(process.env.APPDATA ?? path.join(home, "AppData", "Roaming"), "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "tasks"),
   ],
+  grok: [path.join(home, ".grok", "sessions")],
 };
 
 export const SOURCE_REGISTRY: SourceDefinition[] = SOURCES.map((source) => ({

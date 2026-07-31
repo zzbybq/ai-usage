@@ -6,6 +6,7 @@ export const SOURCES = [
   { id: "gemini-cli", label: "Gemini CLI", shortLabel: "Gemini", accent: "#4285f4", accentEnd: "#8ab4f8" },
   { id: "opencode", label: "OpenCode", shortLabel: "OpenCode", accent: "#f59e0b", accentEnd: "#fcd34d" },
   { id: "cline", label: "Cline", shortLabel: "Cline", accent: "#f43f5e", accentEnd: "#fda4af" },
+  { id: "grok", label: "Grok", shortLabel: "Grok", accent: "#94a3b8", accentEnd: "#cbd5e1" },
 ] as const;
 
 export type SourceId = (typeof SOURCES)[number]["id"];
